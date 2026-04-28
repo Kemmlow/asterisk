@@ -29,25 +29,20 @@ jobs:
           else
             echo "PROMPT_B64=$(echo -n 'Act as a Senior C++ Engineer.' | base64 -w 0)" >> $GITHUB_ENV
           fi
-
-      - name: Run OpenHands (Bare Metal Mode)
+      - name: Run OpenHands
         run: |
-          # Decode the prompt for the environment variable
           DECODED_PROMPT=$(echo "${{ env.PROMPT_B64 }}" | base64 -d)
           
-          # Force local runtime to skip Docker-in-Docker requirements
           docker run --rm \
             --user root \
             -v $(pwd):/opt/workspace_base \
             -e LLM_API_KEY=${{ secrets.NOVITA_API_KEY }} \
             -e LLM_BASE_URL="https://api.novita.ai/openai" \
             -e LLM_MODEL="openai/inclusionai/ling-2.6-1t" \
-            -e LLM_SYSTEM_PROMPT="$DECODED_PROMPT" \
             -e WORKSPACE_BASE="/opt/workspace_base" \
             -e GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} \
-            -e RUNTIME=local \
-            -e SANDBOX_TYPE=local \
-            ghcr.io/all-hands-ai/openhands:0.12 \
+            -e RUNTIME=process \
+            ghcr.io/openhands/openhands:latest \
             python3 -m openhands.core.main \
             -t "${{ github.event.inputs.task_description }}" \
             -d /opt/workspace_base \
