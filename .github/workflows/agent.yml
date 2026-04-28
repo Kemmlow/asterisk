@@ -19,37 +19,29 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Load Instructions from PROMPT.md
-        id: load_prompt
+      - name: Setup OpenHands Env
         run: |
-          # If PROMPT.md exists, load it. If not, use a fallback.
+          # Load PROMPT.md or use fallback
           if [ -f PROMPT.md ]; then
-            PROMPT_CONTENT=$(cat PROMPT.md)
+            echo "SYSTEM_PROMPT=$(cat PROMPT.md | tr '\n' ' ')" >> $GITHUB_ENV
           else
-            PROMPT_CONTENT="Act as a Senior Systems Engineer specializing in C++20 and Rust."
+            echo "SYSTEM_PROMPT=Act as a Senior Systems Engineer." >> $GITHUB_ENV
           fi
-          echo "system_prompt<<EOF" >> $GITHUB_ENV
-          echo "$PROMPT_CONTENT" >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
 
       - name: Run OpenHands Agent
-        uses: docker://ghcr.io/all-hands-ai/openhands:0.12
-        env:
-          # API Configuration
-          LLM_API_KEY: ${{ secrets.NOVITA_API_KEY }}
-          LLM_BASE_URL: "https://api.novita.ai/openai"
-          LLM_MODEL: "inclusionai/ling-2.6-1t"
-          
-          # System logic from PROMPT.md
-          LLM_SYSTEM_PROMPT: ${{ env.system_prompt }}
-          
-          # Workspace settings
-          WORKSPACE_BASE: ${{ github.workspace }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          # Explicitly calling the python module to avoid "command not found" errors
-          args: >
-            python3 -m openhands.core.main 
-            -t "${{ github.event.inputs.task_description }}" 
-            -d /github/workspace 
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v $(pwd):/opt/workspace_base \
+            -e LLM_API_KEY=${{ secrets.NOVITA_API_KEY }} \
+            -e LLM_BASE_URL="https://api.novita.ai/openai" \
+            -e LLM_MODEL="openai/inclusionai/ling-2.6-1t" \
+            -e LLM_SYSTEM_PROMPT="${{ env.SYSTEM_PROMPT }}" \
+            -e WORKSPACE_BASE="/opt/workspace_base" \
+            -e GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} \
+            -e SANDBOX_USER_ID=$(id -u) \
+            ghcr.io/all-hands-ai/openhands:0.12 \
+            python3 -m openhands.core.main \
+            -t "${{ github.event.inputs.task_description }}" \
+            -d /opt/workspace_base \
             -i 500
