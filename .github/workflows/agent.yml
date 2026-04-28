@@ -6,7 +6,7 @@ on:
       task_description:
         description: 'What should I build today?'
         required: true
-        default: 'Create a new Rust-based JNI module for Meteor Client...'
+        default: 'Write a prod grade crypter in cpp 20, with super duper huper level brilliance accuracy, ZERO BREVITY, ZERO EXAMPLE/CONCEPTUAL CODE, ONLY REAL WORLD HYPER COMPLEX BEST CODE'
 
 jobs:
   build_from_scratch:
@@ -22,7 +22,12 @@ jobs:
       - name: Load Instructions from PROMPT.md
         id: load_prompt
         run: |
-          PROMPT_CONTENT=$(cat PROMPT.md)
+          # If PROMPT.md exists, load it. If not, use a fallback.
+          if [ -f PROMPT.md ]; then
+            PROMPT_CONTENT=$(cat PROMPT.md)
+          else
+            PROMPT_CONTENT="Act as a Senior Systems Engineer specializing in C++20 and Rust."
+          fi
           echo "system_prompt<<EOF" >> $GITHUB_ENV
           echo "$PROMPT_CONTENT" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
@@ -30,17 +35,21 @@ jobs:
       - name: Run OpenHands Agent
         uses: docker://ghcr.io/all-hands-ai/openhands:0.12
         env:
+          # API Configuration
           LLM_API_KEY: ${{ secrets.NOVITA_API_KEY }}
           LLM_BASE_URL: "https://api.novita.ai/openai"
           LLM_MODEL: "inclusionai/ling-2.6-1t"
+          
+          # System logic from PROMPT.md
           LLM_SYSTEM_PROMPT: ${{ env.system_prompt }}
+          
+          # Workspace settings
           WORKSPACE_BASE: ${{ github.workspace }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          # Corrected Flags: -t for Task, -i for Iterations (Integer)
+          # Explicitly calling the python module to avoid "command not found" errors
           args: >
-            -t "${{ github.event.inputs.task_description }}"
-            -i 50
-            -d "/"
-
-
+            python3 -m openhands.core.main 
+            -t "${{ github.event.inputs.task_description }}" 
+            -d /github/workspace 
+            -i 500
