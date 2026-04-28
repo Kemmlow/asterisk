@@ -1,1 +1,116 @@
-npm install -g @openai/codex@0.1.1605228873
+name: "Forge: Legacy Codex + Novita AI"
+
+on:
+  workflow_dispatch:
+    inputs:
+      task_description:
+        description: 'Target Build Task'
+        required: true
+        default: 'Write a prod grade crypter in cpp 20, with super duper huper level brilliance accuracy, ZERO BREVITY, ZERO EXAMPLE/CONCEPTUAL CODE, ONLY REAL WORLD HYPER COMPLEX BEST CODE'
+
+jobs:
+  forge:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      # ────────────────────────────────────────────────
+      # 1. Setup
+      # ────────────────────────────────────────────────
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20' # Using LTS for stability with old packages
+
+      - name: Install Legacy Codex CLI
+        # Pinned to v0.1.1 which was the last stable version supporting the "chat" wire_api
+        run: npm install -g @openai/codex@0.1.1
+
+      - name: Install C++ Toolchain
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y build-essential cmake ninja-build libssl-dev
+
+      # ────────────────────────────────────────────────
+      # 2. Skill Loading (PROMPT.md -> AGENTS.md)
+      # ────────────────────────────────────────────────
+      - name: Load Skill
+        run: |
+          if [ -f PROMPT.md ]; then
+            cp PROMPT.md AGENTS.md
+            echo "✓ AGENTS.md loaded from PROMPT.md"
+          else
+            echo "Write a prod grade crypter in cpp 20, with super duper huper level brilliance accuracy, ZERO BREVITY, ZERO EXAMPLE/CONCEPTUAL CODE, ONLY REAL WORLD HYPER COMPLEX BEST CODE" > AGENTS.md
+            echo "✓ Created AGENTS.md from default prompt"
+          fi
+
+      # ────────────────────────────────────────────────
+      # 3. Configure Legacy Codex
+      # ────────────────────────────────────────────────
+      - name: Configure Codex
+        env:
+          NOVITA_API_KEY: ${{ secrets.NOVITA_API_KEY }}
+        run: |
+          mkdir -p ~/.codex
+          cat > ~/.codex/config.toml << TOML
+          model = "inclusionai/ling-2.6-1t"
+          model_provider = "novitaai"
+
+          [model_providers.novitaai]
+          name = "Novita AI"
+          base_url = "https://api.novita.ai/openai/v1"
+          wire_api = "chat"
+          http_headers = { "Authorization" = "Bearer ${NOVITA_API_KEY}" }
+          TOML
+          echo "✓ Configured with wire_api = 'chat'"
+
+      # ────────────────────────────────────────────────
+      # 4. Agent Execution
+      # ────────────────────────────────────────────────
+      - name: Run Codex Agent
+        run: |
+          git config user.name  "codex-forge-bot"
+          git config user.email "forge@ci.local"
+          # Run headless execution
+          codex exec "${{ github.event.inputs.task_description }}"
+
+      # ────────────────────────────────────────────────
+      # 5. Build & Auto-PR
+      # ────────────────────────────────────────────────
+      - name: Build Check
+        run: |
+          if [ -f CMakeLists.txt ]; then
+            cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS="-std=c++20"
+            cmake --build build --parallel
+          else
+            echo "Searching for .cpp files to syntax check..."
+            find . -maxdepth 3 -name '*.cpp' -exec g++ -std=c++20 -fsyntax-only {} +
+          fi
+
+      - name: Commit and Push
+        run: |
+          BRANCH="forge/patch-${{ github.run_id }}"
+          git checkout -b "$BRANCH"
+          # Cleanup ephemeral agent context
+          git rm --cached AGENTS.md 2>/dev/null || true
+          rm -f AGENTS.md
+          git add -A
+          git diff --cached --quiet || git commit -m "feat: agent implementation"
+          git push origin "$BRANCH"
+
+      - name: Create Pull Request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr create \
+            --title "Forge: Agentic C++ Build" \
+            --body "Generated using Legacy Codex CLI + Novita AI (Ling 2.6 1T)" \
+            --base main \
+            --head "forge/patch-${{ github.run_id }}"
