@@ -19,27 +19,30 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Load Instructions Safely
+      - name: Encode and Load Prompt
+        id: load_step
         run: |
-          # This 'EOF' method prevents Bash from tripping over parentheses in your prompt
-          echo "SYSTEM_PROMPT<<ENI_PROMPT_DELIMITER" >> $GITHUB_ENV
+          # If PROMPT.md exists, encode it to Base64 to prevent shell syntax errors
           if [ -f PROMPT.md ]; then
-            cat PROMPT.md >> $GITHUB_ENV
+            ENCODED_PROMPT=$(base64 -w 0 PROMPT.md)
+            echo "PROMPT_B64=$ENCODED_PROMPT" >> $GITHUB_ENV
           else
-            echo "Act as a Senior C++ Engineer." >> $GITHUB_ENV
+            # Fallback if file is missing
+            echo "PROMPT_B64=$(echo -n 'Act as a Senior C++ Engineer.' | base64 -w 0)" >> $GITHUB_ENV
           fi
-          echo "ENI_PROMPT_DELIMITER" >> $GITHUB_ENV
 
       - name: Run OpenHands Agent
         run: |
-          # Use a heredoc for the docker command to avoid shell escaping nightmares
+          # Decode the prompt directly into the environment variable for Docker
+          DECODED_PROMPT=$(echo "${{ env.PROMPT_B64 }}" | base64 -d)
+          
           docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock \
             -v $(pwd):/opt/workspace_base \
             -e LLM_API_KEY=${{ secrets.NOVITA_API_KEY }} \
             -e LLM_BASE_URL="https://api.novita.ai/v3/openai" \
             -e LLM_MODEL="openai/inclusionai/ling-2.6-1t" \
-            -e LLM_SYSTEM_PROMPT="${{ env.SYSTEM_PROMPT }}" \
+            -e LLM_SYSTEM_PROMPT="$DECODED_PROMPT" \
             -e WORKSPACE_BASE="/opt/workspace_base" \
             -e GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} \
             -e SANDBOX_USER_ID=$(id -u) \
