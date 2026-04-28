@@ -37,5 +37,10 @@ jobs:
           WORKSPACE_BASE: ${{ github.workspace }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          # Use a single string or properly escaped multi-line string
-          args: python3 -m openhands.core.main -i "${{ github.event.inputs.task_description }}" -d "Initialize the project, write the code from scratch, and submit a PR with the result."
+          # Corrected Flags: -t for Task, -i for Iterations (Integer)
+          args: >
+            -t "${{ github.event.inputs.task_description }}"
+            -i 50
+            -d "/"
+
+
