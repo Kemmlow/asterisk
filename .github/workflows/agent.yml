@@ -1,4 +1,4 @@
-name: "Forge: OpenClaw + Novita AI"
+name: "Forge: Aider + Novita AI"
 
 on:
   workflow_dispatch:
@@ -16,46 +16,69 @@ jobs:
       pull-requests: write
 
     steps:
-      - name: Checkout Repository
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          node-version: '22'
+          python-version: '3.12'
 
-      - name: Install OpenClaw + Build Tools
+      - name: Install Aider + Build Tools
         run: |
-          npm install -g openclaw
+          pip install aider-chat
           sudo apt-get update -qq
           sudo apt-get install -y build-essential cmake ninja-build libssl-dev
 
       - name: Configure Git
         run: |
-          git config user.name "openclaw-forge"
+          git config user.name "aider-forge"
           git config user.email "forge@ci.local"
 
-      - name: Run OpenClaw Agent
+      - name: Run Aider Agent (Full Autonomy)
         env:
           OPENAI_API_KEY: ${{ secrets.NOVITA_API_KEY }}
-          OPENAI_BASE_URL: "https://api.novita.ai/openai/"
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENAI_API_BASE: "https://api.novita.ai/openai/v1"
         run: |
-          SYSTEM_PROMPT=$(cat PROMPT.md 2>/dev/null || echo "You are an elite Senior C++ Engineer.")
+          PROMPT=$(cat PROMPT.md 2>/dev/null || echo "You are an elite C++ engineer.")
+          BRANCH="forge/patch-${{ github.run_id }}"
           
-          openclaw \
-            --model "inclusionai/ling-2.6-1t" \
-            --yes \
-            --message "$SYSTEM_PROMPT
+          git checkout -b "$BRANCH"
+          
+          aider \
+            --model "openai/inclusionai/ling-2.6-1t" \
+            --yes-always \
+            --auto-commits \
+            --no-auto-lint \
+            --message "$PROMPT
 
           TASK: ${{ github.event.inputs.task_description }}
 
-          Rules:
-          - Use the exact style and requirements from PROMPT.md
-          - Build the project with cmake + ninja
-          - Fix all errors until it compiles cleanly
-          - Commit all changes with clear messages
-          - Push to a new branch
-          - Create a Pull Request automatically"
+          WORKFLOW STEPS YOU MUST COMPLETE:
+          1. Write all C++20 code with full implementations (zero placeholders)
+          2. Create a complete CMakeLists.txt
+          3. Build with: cmake -B build -G Ninja && cmake --build build
+          4. Fix any compilation errors by reading error messages and correcting code
+          5. Repeat build until it succeeds with zero errors
+          6. All changes are auto-committed by aider"
+
+      - name: Final Build Verification
+        run: |
+          if [ -f CMakeLists.txt ]; then
+            cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+            cmake --build build --parallel
+          fi
+
+      - name: Push and Create PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH="forge/patch-${{ github.run_id }}"
+          git push origin "$BRANCH"
+          gh pr create \
+            --title "Forge: ${{ github.event.inputs.task_description }}" \
+            --body "Autonomous implementation via Aider + Novita AI (ling-2.6-1t)" \
+            --base main \
+            --head "$BRANCH"
