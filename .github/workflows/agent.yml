@@ -1,0 +1,45 @@
+name: "Forge: Create from Scratch"
+
+on:
+  workflow_dispatch:
+    inputs:
+      task_description:
+        description: 'What should I build today?'
+        required: true
+        default: 'Create a new Rust-based JNI module for Meteor Client...'
+
+jobs:
+  build_from_scratch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Load Instructions from PROMPT.md
+        id: load_prompt
+        run: |
+          PROMPT_CONTENT=$(cat PROMPT.md)
+          echo "system_prompt<<EOF" >> $GITHUB_ENV
+          echo "$PROMPT_CONTENT" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+      - name: Run OpenHands Agent
+        uses: docker://ghcr.io/all-hands-ai/openhands:0.12
+        env:
+          LLM_API_KEY: ${{ secrets.NOVITA_API_KEY }}
+          LLM_BASE_URL: "https://api.novita.ai/v3/openai"
+          LLM_MODEL: "inclusionai/ling-2.6-1t"
+          
+          # System logic from your file
+          LLM_SYSTEM_PROMPT: ${{ env.system_prompt }}
+          
+          WORKSPACE_BASE: ${{ github.workspace }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: >
+            -i "${{ github.event.inputs.task_description }}"
+            -d "Initialize the project, write the code from scratch, and submit a PR with the result."
