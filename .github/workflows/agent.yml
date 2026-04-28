@@ -14,71 +14,75 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      issues: write
+      actions: write
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      - name: Install Aider + Build Tools
+      - name: Install Dependencies
         run: |
-          pip install aider-chat
+          pip install -q aider-chat
           sudo apt-get update -qq
           sudo apt-get install -y build-essential cmake ninja-build libssl-dev
 
-      - name: Configure Git
-        run: |
-          git config user.name "aider-forge"
-          git config user.email "forge@ci.local"
-
-      - name: Run Aider Agent (Full Autonomy)
+      - name: Forge
         env:
           OPENAI_API_KEY: ${{ secrets.NOVITA_API_KEY }}
           OPENAI_API_BASE: "https://api.novita.ai/openai/v1"
         run: |
-          PROMPT=$(cat PROMPT.md 2>/dev/null || echo "You are an elite C++ engineer.")
-          BRANCH="forge/patch-${{ github.run_id }}"
-          
-          git checkout -b "$BRANCH"
-          
+          git config user.name "forge-bot"
+          git config user.email "forge@ci.local"
+          git checkout -b "forge/${{ github.run_id }}"
+
+          SKILL=$(cat PROMPT.md 2>/dev/null || echo "You are an elite C++ engineer. Write production code only.")
+
+          cat > /tmp/forge_task.txt << 'TASK'
+          $SKILL
+
+          CRITICAL TASK: ${{ github.event.inputs.task_description }}
+
+          EXECUTION PROTOCOL (MANDATORY):
+          1. Implement all code in C++20 (zero stubs, zero TODOs, zero placeholders)
+          2. Create complete CMakeLists.txt with all targets
+          3. Run: cmake -B build -G Ninja -DCMAKE_CXX_FLAGS="-std=c++20 -Wall -Wextra"
+          4. Run: cmake --build build --parallel
+          5. IF BUILD FAILS: Read error output, fix code, goto step 3
+          6. REPEAT until build succeeds with ZERO errors
+          7. Only exit when: cmake --build build completes successfully
+
+          DO NOT STOP until the build is GREEN.
+          TASK
+
           aider \
             --model "openai/inclusionai/ling-2.6-1t" \
             --yes-always \
             --auto-commits \
             --no-auto-lint \
-            --message "$PROMPT
+            --message "$(cat /tmp/forge_task.txt)"
 
-          TASK: ${{ github.event.inputs.task_description }}
-
-          WORKFLOW STEPS YOU MUST COMPLETE:
-          1. Write all C++20 code with full implementations (zero placeholders)
-          2. Create a complete CMakeLists.txt
-          3. Build with: cmake -B build -G Ninja && cmake --build build
-          4. Fix any compilation errors by reading error messages and correcting code
-          5. Repeat build until it succeeds with zero errors
-          6. All changes are auto-committed by aider"
-
-      - name: Final Build Verification
-        run: |
+          # Final verification
           if [ -f CMakeLists.txt ]; then
-            cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-            cmake --build build --parallel
+            cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS="-std=c++20"
+            cmake --build build --parallel || {
+              echo "❌ Build still failing after agent completion"
+              exit 1
+            }
           fi
 
-      - name: Push and Create PR
+      - name: Ship
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          BRANCH="forge/patch-${{ github.run_id }}"
-          git push origin "$BRANCH"
+          git push -u origin "forge/${{ github.run_id }}"
           gh pr create \
             --title "Forge: ${{ github.event.inputs.task_description }}" \
-            --body "Autonomous implementation via Aider + Novita AI (ling-2.6-1t)" \
+            --body "**Autonomous build** • Agent: Aider • Model: ling-2.6-1t" \
             --base main \
-            --head "$BRANCH"
+            --head "forge/${{ github.run_id }}"
