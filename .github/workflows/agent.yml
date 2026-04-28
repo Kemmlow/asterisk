@@ -22,6 +22,7 @@ jobs:
       - name: Encode and Load Prompt
         id: load_step
         run: |
+          # Encode PROMPT.md to Base64 to bypass Bash syntax errors (parentheses/special chars)
           if [ -f PROMPT.md ]; then
             ENCODED_PROMPT=$(base64 -w 0 PROMPT.md)
             echo "PROMPT_B64=$ENCODED_PROMPT" >> $GITHUB_ENV
@@ -31,10 +32,12 @@ jobs:
 
       - name: Run OpenHands (Bare Metal Mode)
         run: |
+          # Decode the prompt for the environment variable
           DECODED_PROMPT=$(echo "${{ env.PROMPT_B64 }}" | base64 -d)
           
-          # We run the container, but tell it to use the HOST as the runtime
+          # Force local runtime to skip Docker-in-Docker requirements
           docker run --rm \
+            --user root \
             -v $(pwd):/opt/workspace_base \
             -e LLM_API_KEY=${{ secrets.NOVITA_API_KEY }} \
             -e LLM_BASE_URL="https://api.novita.ai/openai" \
@@ -42,7 +45,6 @@ jobs:
             -e LLM_SYSTEM_PROMPT="$DECODED_PROMPT" \
             -e WORKSPACE_BASE="/opt/workspace_base" \
             -e GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} \
-            -e SANDBOX_USER_ID=$(id -u) \
             -e RUNTIME=local \
             -e SANDBOX_TYPE=local \
             ghcr.io/all-hands-ai/openhands:0.12 \
