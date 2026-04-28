@@ -1,4 +1,4 @@
-name: "Forge: Create from Scratch"
+name: "Forge: Codex CLI + Novita AI"
 
 on:
   workflow_dispatch:
@@ -9,41 +9,217 @@ on:
         default: 'Write a prod grade crypter in cpp 20, with super duper huper level brilliance accuracy, ZERO BREVITY, ZERO EXAMPLE/CONCEPTUAL CODE, ONLY REAL WORLD HYPER COMPLEX BEST CODE'
 
 jobs:
-  build_from_scratch:
+  forge:
     runs-on: ubuntu-latest
     permissions:
       contents: write
       pull-requests: write
 
     steps:
+
+      # ────────────────────────────────────────────────
+      # 1. Checkout
+      # ────────────────────────────────────────────────
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Encode and Load Prompt
-        id: load_step
+      # ────────────────────────────────────────────────
+      # 2. Node.js
+      # ────────────────────────────────────────────────
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # ────────────────────────────────────────────────
+      # 3. Install Codex CLI
+      # ────────────────────────────────────────────────
+      - name: Install Codex CLI
+        run: npm install -g @openai/codex
+
+      # ────────────────────────────────────────────────
+      # 4. Install C++ Toolchain
+      # ────────────────────────────────────────────────
+      - name: Install Build Dependencies
         run: |
-          # Encode PROMPT.md to Base64 to bypass Bash syntax errors (parentheses/special chars)
-          if [ -f PROMPT.md ]; then
-            ENCODED_PROMPT=$(base64 -w 0 PROMPT.md)
-            echo "PROMPT_B64=$ENCODED_PROMPT" >> $GITHUB_ENV
-          else
-            echo "PROMPT_B64=$(echo -n 'Act as a Senior C++ Engineer.' | base64 -w 0)" >> $GITHUB_ENV
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            ninja-build \
+            cppcheck \
+            clang-tidy \
+            libssl-dev
+
+      # ────────────────────────────────────────────────
+      # 5. PROMPT.md → AGENTS.md
+      # ────────────────────────────────────────────────
+      - name: Load Skill from PROMPT.md
+        run: |
+          if [ ! -f PROMPT.md ]; then
+            echo "❌ PROMPT.md not found — aborting"
+            exit 1
           fi
-      - name: Run OpenHands
+
+          cp PROMPT.md AGENTS.md
+
+          echo "✓ AGENTS.md written from PROMPT.md:"
+          echo "─────────────────────────────────────"
+          cat AGENTS.md
+          echo "─────────────────────────────────────"
+
+      # ────────────────────────────────────────────────
+      # 6. Configure Codex → Novita AI
+      # ────────────────────────────────────────────────
+      - name: Configure Codex
+        env:
+          NOVITA_API_KEY: ${{ secrets.NOVITA_API_KEY }}
         run: |
-          DECODED_PROMPT=$(echo "${{ env.PROMPT_B64 }}" | base64 -d)
-          
-          docker run --rm \
-            --user root \
-            -v $(pwd):/opt/workspace_base \
-            -e LLM_API_KEY=${{ secrets.NOVITA_API_KEY }} \
-            -e LLM_BASE_URL="https://api.novita.ai/openai" \
-            -e LLM_MODEL="openai/inclusionai/ling-2.6-1t" \
-            -e WORKSPACE_BASE="/opt/workspace_base" \
-            -e GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} \
-            -e RUNTIME=process \
-            ghcr.io/openhands/openhands:latest \
-            python3 -m openhands.core.main \
-            -t "${{ github.event.inputs.task_description }}" \
-            -d /opt/workspace_base \
-            -i 300
+          mkdir -p ~/.codex
+
+          cat > ~/.codex/config.toml << TOML
+          model = "inclusionai/ling-2.6-1t"
+          model_provider = "novitaai"
+
+          [model_providers.novitaai]
+          name = "Novita AI"
+          base_url = "https://api.novita.ai/openai"
+          wire_api = "chat"
+          http_headers = { "Authorization" = "Bearer ${NOVITA_API_KEY}" }
+          TOML
+
+          echo "✓ Codex config written"
+
+      # ────────────────────────────────────────────────
+      # 7. Configure Git
+      # ────────────────────────────────────────────────
+      - name: Configure Git
+        run: |
+          git config user.name  "codex-forge-bot"
+          git config user.email "forge@ci.local"
+
+      # ────────────────────────────────────────────────
+      # 8. Run Codex Agent — Primary Pass
+      # ────────────────────────────────────────────────
+      - name: Run Codex Agent
+        run: |
+          codex exec "${{ github.event.inputs.task_description }}"
+
+      # ────────────────────────────────────────────────
+      # 9. Build Verification Gate
+      # ────────────────────────────────────────────────
+      - name: Build Verification
+        id: build_check
+        continue-on-error: true
+        run: |
+          if [ -f CMakeLists.txt ]; then
+            cmake -B build \
+              -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_CXX_FLAGS="-Wall -Wextra -Wpedantic -std=c++20"
+            cmake --build build --parallel 2>&1 | tee build.log
+            cd build && ctest --output-on-failure 2>&1 | tee ../test.log || true
+          else
+            echo "No CMakeLists.txt — syntax-checking .cpp files"
+            find . -maxdepth 4 -name '*.cpp' ! -path './build/*' \
+              -exec g++ -std=c++20 -Wall -Wextra -fsyntax-only {} \; \
+              2>&1 | tee build.log
+          fi
+
+          if grep -qi "error:" build.log; then
+            echo "build_failed=true" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          echo "build_failed=false" >> $GITHUB_OUTPUT
+
+      # ────────────────────────────────────────────────
+      # 10. Self-Heal Pass (only if build failed)
+      # ────────────────────────────────────────────────
+      - name: Self-Heal
+        if: steps.build_check.outputs.build_failed == 'true'
+        run: |
+          BUILD_ERRORS=$(cat build.log 2>/dev/null || echo "unavailable")
+          TEST_ERRORS=$(cat  test.log 2>/dev/null || echo "")
+
+          codex exec "The build failed. Read every error carefully and fix all of them.
+          Do NOT explain anything. Only fix the code, headers, and CMakeLists.txt.
+
+          ── BUILD ERRORS ──────────────────────────────
+          $BUILD_ERRORS
+
+          ── TEST ERRORS ───────────────────────────────
+          $TEST_ERRORS"
+
+      # ────────────────────────────────────────────────
+      # 11. Rebuild After Heal
+      # ────────────────────────────────────────────────
+      - name: Rebuild After Heal
+        if: steps.build_check.outputs.build_failed == 'true'
+        run: |
+          rm -rf build
+          if [ -f CMakeLists.txt ]; then
+            cmake -B build \
+              -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_CXX_FLAGS="-Wall -Wextra -Wpedantic -std=c++20"
+            cmake --build build --parallel 2>&1 | tee build_healed.log
+            echo "──── Healed Build Log ────"
+            cat build_healed.log
+          fi
+
+      # ────────────────────────────────────────────────
+      # 12. Static Analysis
+      # ────────────────────────────────────────────────
+      - name: Static Analysis
+        continue-on-error: true
+        run: |
+          mapfile -t CPP_FILES < <(find . -name '*.cpp' -o -name '*.h' | grep -v build/)
+          if [ ${#CPP_FILES[@]} -gt 0 ]; then
+            cppcheck \
+              --enable=warning,style,performance,portability \
+              --std=c++20 \
+              --error-exitcode=0 \
+              "${CPP_FILES[@]}"
+          fi
+
+      # ────────────────────────────────────────────────
+      # 13. Commit + Push + PR
+      # ────────────────────────────────────────────────
+      - name: Commit and Push
+        run: |
+          BRANCH="forge/patch-${{ github.run_id }}"
+          git checkout -b "$BRANCH"
+
+          # Remove AGENTS.md before committing (derived from PROMPT.md, ephemeral)
+          git rm --cached AGENTS.md 2>/dev/null || true
+          rm -f AGENTS.md
+
+          git add -A
+          git diff --cached --quiet || \
+            git commit -m "feat: ${{ github.event.inputs.task_description }}"
+
+          git push origin "$BRANCH"
+
+      - name: Create Pull Request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH="forge/patch-${{ github.run_id }}"
+
+          gh pr create \
+            --title  "Forge: ${{ github.event.inputs.task_description }}" \
+            --body   "## Autonomous Implementation
+
+          | Field   | Value |
+          |---------|-------|
+          | **Agent** | Codex CLI (FOSS) |
+          | **Model** | \`inclusionai/ling-2.6-1t\` via Novita AI |
+          | **Skill** | Loaded from \`PROMPT.md\` → \`AGENTS.md\` |
+          | **Task**  | ${{ github.event.inputs.task_description }} |
+          | **Run**   | ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }} |
+
+          All code was autonomously generated with build verification and self-heal passes." \
+            --base main \
+            --head "$BRANCH"
