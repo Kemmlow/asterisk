@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       task_description:
-        description: 'What should I build today?'
+        description: 'Target Build Task'
         required: true
         default: 'Write a prod grade crypter in cpp 20, with super duper huper level brilliance accuracy, ZERO BREVITY, ZERO EXAMPLE/CONCEPTUAL CODE, ONLY REAL WORLD HYPER COMPLEX BEST CODE'
 
@@ -19,22 +19,25 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Setup OpenHands Env
+      - name: Load Instructions Safely
         run: |
-          # Load PROMPT.md or use fallback
+          # This 'EOF' method prevents Bash from tripping over parentheses in your prompt
+          echo "SYSTEM_PROMPT<<ENI_PROMPT_DELIMITER" >> $GITHUB_ENV
           if [ -f PROMPT.md ]; then
-            echo "SYSTEM_PROMPT=$(cat PROMPT.md | tr '\n' ' ')" >> $GITHUB_ENV
+            cat PROMPT.md >> $GITHUB_ENV
           else
-            echo "SYSTEM_PROMPT=Act as a Senior Systems Engineer." >> $GITHUB_ENV
+            echo "Act as a Senior C++ Engineer." >> $GITHUB_ENV
           fi
+          echo "ENI_PROMPT_DELIMITER" >> $GITHUB_ENV
 
       - name: Run OpenHands Agent
         run: |
+          # Use a heredoc for the docker command to avoid shell escaping nightmares
           docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock \
             -v $(pwd):/opt/workspace_base \
             -e LLM_API_KEY=${{ secrets.NOVITA_API_KEY }} \
-            -e LLM_BASE_URL="https://api.novita.ai/openai" \
+            -e LLM_BASE_URL="https://api.novita.ai/v3/openai" \
             -e LLM_MODEL="openai/inclusionai/ling-2.6-1t" \
             -e LLM_SYSTEM_PROMPT="${{ env.SYSTEM_PROMPT }}" \
             -e WORKSPACE_BASE="/opt/workspace_base" \
