@@ -32,16 +32,31 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y build-essential cmake ninja-build libssl-dev
 
+      - name: Validate Secrets
+        # Fail FAST and loudly if the key is missing — don't waste 10 min
+        run: |
+          if [ -z "${{ secrets.NOVITA_API_KEY }}" ]; then
+            echo "::error::NOVITA_API_KEY secret is not set. Aborting."
+            exit 1
+          fi
+
       - name: Forge
         env:
           OPENAI_API_KEY: ${{ secrets.NOVITA_API_KEY }}
           OPENAI_API_BASE: "https://api.novita.ai/openai/v1"
         run: |
+          set -euo pipefail   # ← CRITICAL: exit on any error, unset var, or pipe fail
+
           git config user.name "forge-bot"
           git config user.email "forge@ci.local"
           git checkout -b "forge/${{ github.run_id }}"
 
           SKILL=$(cat PROMPT.md 2>/dev/null || echo "You are an elite C++ engineer.")
+
+          # Seed an empty file so aider has a repo target to work with
+          # (avoids "no files" silent no-op on a bare/empty repo)
+          touch crypter_placeholder.cpp
+          git add crypter_placeholder.cpp
 
           aider \
             --model "openai/inclusionai/ling-2.6-1t" \
@@ -49,7 +64,7 @@ jobs:
             --auto-commits \
             --no-auto-lint \
             --map-tokens 8192 \
-            --max-chat-history-tokens 128000 \
+            --max-chat-history-tokens 32768 \
             --message "$SKILL
 
           ═══════════════════════════════════════════════
@@ -77,7 +92,7 @@ jobs:
 
           PHASE 4 — FIX
           Read EVERY compiler error in the output carefully:
-          - Type mismatch (e.g. std::array vs std::vector) → use .assign(x.begin(), x.end())
+          - Type mismatch → fix the type
           - Unused parameter with -Werror → add [[maybe_unused]] or use the param
           - Missing include → add the correct #include
           - Undefined reference → add to CMakeLists.txt target_link_libraries
@@ -86,16 +101,26 @@ jobs:
 
           PHASE 5 — REPEAT
           Keep looping PHASE 2 → PHASE 3 → PHASE 4 until PHASE 3 says SUCCESS.
-          There is no iteration limit. Do not stop until the build is GREEN.
           Do not ask for confirmation. Do not summarize. Just fix and build again.
 
           YOU MUST NOT EXIT UNTIL: cmake --build build exits with code 0."
+
+          # ── Guard: fail the step if aider made zero commits ──────────────
+          COMMITS_AHEAD=$(git rev-list --count origin/main..HEAD)
+          echo "Commits ahead of main: $COMMITS_AHEAD"
+          if [ "$COMMITS_AHEAD" -eq 0 ]; then
+            echo "::error::Aider produced no commits. The model likely failed silently."
+            exit 1
+          fi
 
       - name: Ship
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
+
           git push -u origin "forge/${{ github.run_id }}"
+
           gh pr create \
             --title "Forge: ${{ github.event.inputs.task_description }}" \
             --body "**Build verified green** | Agent: Aider | Model: ling-2.6-1t | Unlimited token mode" \
