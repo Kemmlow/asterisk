@@ -31,15 +31,11 @@ jobs:
         uses: docker://ghcr.io/all-hands-ai/openhands:0.12
         env:
           LLM_API_KEY: ${{ secrets.NOVITA_API_KEY }}
-          LLM_BASE_URL: "https://api.novita.ai/v3/openai"
+          LLM_BASE_URL: "https://api.novita.ai/openai"
           LLM_MODEL: "inclusionai/ling-2.6-1t"
-          
-          # System logic from your file
           LLM_SYSTEM_PROMPT: ${{ env.system_prompt }}
-          
           WORKSPACE_BASE: ${{ github.workspace }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          args: >
-            -i "${{ github.event.inputs.task_description }}"
-            -d "Initialize the project, write the code from scratch, and submit a PR with the result."
+          # Use a single string or properly escaped multi-line string
+          args: python3 -m openhands.core.main -i "${{ github.event.inputs.task_description }}" -d "Initialize the project, write the code from scratch, and submit a PR with the result."
