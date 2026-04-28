@@ -29,12 +29,12 @@ jobs:
             echo "PROMPT_B64=$(echo -n 'Act as a Senior C++ Engineer.' | base64 -w 0)" >> $GITHUB_ENV
           fi
 
-      - name: Run OpenHands Agent
+      - name: Run OpenHands (Bare Metal Mode)
         run: |
           DECODED_PROMPT=$(echo "${{ env.PROMPT_B64 }}" | base64 -d)
           
+          # We run the container, but tell it to use the HOST as the runtime
           docker run --rm \
-            -v /var/run/docker.sock:/var/run/docker.sock \
             -v $(pwd):/opt/workspace_base \
             -e LLM_API_KEY=${{ secrets.NOVITA_API_KEY }} \
             -e LLM_BASE_URL="https://api.novita.ai/openai" \
@@ -43,9 +43,10 @@ jobs:
             -e WORKSPACE_BASE="/opt/workspace_base" \
             -e GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} \
             -e SANDBOX_USER_ID=$(id -u) \
-            -e SANDBOX_IMAGE="ghcr.io/all-hands-ai/runtime:0.12-nikola" \
+            -e RUNTIME=local \
+            -e SANDBOX_TYPE=local \
             ghcr.io/all-hands-ai/openhands:0.12 \
             python3 -m openhands.core.main \
             -t "${{ github.event.inputs.task_description }}" \
             -d /opt/workspace_base \
-            -i 500
+            -i 300
