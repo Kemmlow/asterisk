@@ -32,7 +32,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y build-essential cmake ninja-build libssl-dev
 
-      - name: Forge
+      - name: Forge (Iterative Build Loop)
         env:
           OPENAI_API_KEY: ${{ secrets.NOVITA_API_KEY }}
           OPENAI_API_BASE: "https://api.novita.ai/openai/v1"
@@ -41,40 +41,94 @@ jobs:
           git config user.email "forge@ci.local"
           git checkout -b "forge/${{ github.run_id }}"
 
-          SKILL=$(cat PROMPT.md 2>/dev/null || echo "You are an elite C++ engineer. Write production code only.")
+          SKILL=$(cat PROMPT.md 2>/dev/null || echo "You are an elite C++ engineer.")
+          MAX_ITERATIONS=10
+          ITERATION=0
 
-          cat > /tmp/forge_task.txt << 'TASK'
+          # Initial code generation
+          cat > /tmp/task.txt << 'TASK'
           $SKILL
 
-          CRITICAL TASK: ${{ github.event.inputs.task_description }}
+          TASK: ${{ github.event.inputs.task_description }}
 
-          EXECUTION PROTOCOL (MANDATORY):
-          1. Implement all code in C++20 (zero stubs, zero TODOs, zero placeholders)
-          2. Create complete CMakeLists.txt with all targets
-          3. Run: cmake -B build -G Ninja -DCMAKE_CXX_FLAGS="-std=c++20 -Wall -Wextra"
-          4. Run: cmake --build build --parallel
-          5. IF BUILD FAILS: Read error output, fix code, goto step 3
-          6. REPEAT until build succeeds with ZERO errors
-          7. Only exit when: cmake --build build completes successfully
-
-          DO NOT STOP until the build is GREEN.
+          REQUIREMENTS:
+          - Full C++20 implementation (zero placeholders, zero TODOs)
+          - Complete CMakeLists.txt with all targets
+          - Production-grade error handling and RAII
+          - Build with: cmake -B build -G Ninja -DCMAKE_CXX_FLAGS="-std=c++20 -Wall -Wextra -Werror"
           TASK
+
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "ITERATION 0: Initial code generation"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
           aider \
             --model "openai/inclusionai/ling-2.6-1t" \
             --yes-always \
             --auto-commits \
             --no-auto-lint \
-            --message "$(cat /tmp/forge_task.txt)"
+            --message "$(cat /tmp/task.txt)"
+
+          # Iterative build-fix loop
+          while [ $ITERATION -lt $MAX_ITERATIONS ]; do
+            ITERATION=$((ITERATION + 1))
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "ITERATION $ITERATION: Build verification"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+            # Attempt build
+            if [ -f CMakeLists.txt ]; then
+              rm -rf build
+              if cmake -B build -G Ninja \
+                   -DCMAKE_BUILD_TYPE=Release \
+                   -DCMAKE_CXX_FLAGS="-std=c++20 -Wall -Wextra -Werror" 2>&1 | tee /tmp/cmake.log && \
+                 cmake --build build --parallel 2>&1 | tee /tmp/build.log; then
+                echo "✅ BUILD SUCCESS"
+                break
+              else
+                echo "❌ BUILD FAILED - Feeding errors back to agent"
+                
+                # Extract errors
+                ERRORS=$(cat /tmp/cmake.log /tmp/build.log | grep -E "error:|Error|ERROR" | head -100)
+                
+                # Feed errors back to agent for fixing
+                cat > /tmp/fix_task.txt << FIXTASK
+          The build failed with the following errors. Read them carefully and fix ONLY the issues mentioned.
+          Do not refactor unrelated code. Fix the exact problems shown below.
+
+          BUILD ERRORS:
+          $ERRORS
+
+          INSTRUCTIONS:
+          1. Read each error carefully
+          2. Fix the exact issue (type mismatches, unused parameters, missing includes, etc.)
+          3. Do NOT add placeholder code
+          4. Do NOT remove functionality
+          5. Make minimal changes to fix the errors
+          FIXTASK
+
+                aider \
+                  --model "openai/inclusionai/ling-2.6-1t" \
+                  --yes-always \
+                  --auto-commits \
+                  --no-auto-lint \
+                  --message "$(cat /tmp/fix_task.txt)"
+              fi
+            else
+              echo "❌ No CMakeLists.txt found"
+              exit 1
+            fi
+          done
 
           # Final verification
-          if [ -f CMakeLists.txt ]; then
-            cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS="-std=c++20"
-            cmake --build build --parallel || {
-              echo "❌ Build still failing after agent completion"
-              exit 1
-            }
+          if [ $ITERATION -eq $MAX_ITERATIONS ]; then
+            echo "❌ Max iterations reached without successful build"
+            exit 1
           fi
+
+          echo ""
+          echo "✅ Build successful after $ITERATION iteration(s)"
 
       - name: Ship
         env:
@@ -83,6 +137,6 @@ jobs:
           git push -u origin "forge/${{ github.run_id }}"
           gh pr create \
             --title "Forge: ${{ github.event.inputs.task_description }}" \
-            --body "**Autonomous build** • Agent: Aider • Model: ling-2.6-1t" \
+            --body "**Autonomous build completed** • Agent: Aider • Model: ling-2.6-1t • Build iterations: automatic" \
             --base main \
             --head "forge/${{ github.run_id }}"
