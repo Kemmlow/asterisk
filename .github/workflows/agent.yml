@@ -22,30 +22,28 @@ jobs:
       - name: Encode and Load Prompt
         id: load_step
         run: |
-          # If PROMPT.md exists, encode it to Base64 to prevent shell syntax errors
           if [ -f PROMPT.md ]; then
             ENCODED_PROMPT=$(base64 -w 0 PROMPT.md)
             echo "PROMPT_B64=$ENCODED_PROMPT" >> $GITHUB_ENV
           else
-            # Fallback if file is missing
             echo "PROMPT_B64=$(echo -n 'Act as a Senior C++ Engineer.' | base64 -w 0)" >> $GITHUB_ENV
           fi
 
       - name: Run OpenHands Agent
         run: |
-          # Decode the prompt directly into the environment variable for Docker
           DECODED_PROMPT=$(echo "${{ env.PROMPT_B64 }}" | base64 -d)
           
           docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock \
             -v $(pwd):/opt/workspace_base \
             -e LLM_API_KEY=${{ secrets.NOVITA_API_KEY }} \
-            -e LLM_BASE_URL="https://api.novita.ai/v3/openai" \
+            -e LLM_BASE_URL="https://api.novita.ai/openai" \
             -e LLM_MODEL="openai/inclusionai/ling-2.6-1t" \
             -e LLM_SYSTEM_PROMPT="$DECODED_PROMPT" \
             -e WORKSPACE_BASE="/opt/workspace_base" \
             -e GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} \
             -e SANDBOX_USER_ID=$(id -u) \
+            -e SANDBOX_IMAGE="ghcr.io/all-hands-ai/runtime:0.12-nikola" \
             ghcr.io/all-hands-ai/openhands:0.12 \
             python3 -m openhands.core.main \
             -t "${{ github.event.inputs.task_description }}" \
