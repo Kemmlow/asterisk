@@ -95,10 +95,10 @@ jobs:
 
       # ─────────────────────────────────────────────
       # 4. PYTHON TOOLS
-      #    Install uv first — uvx must be on $PATH
-      #    before the MCP server config references it.
-      #    aider[playwright] covers built-in scraping
-      #    fallback AND the MCP browser extras.
+      #    uv first → uvx on $PATH before MCP starts.
+      #    aider[playwright] pre-installs the browser
+      #    scraping fallback so aider never auto-
+      #    installs anything mid-run.
       # ─────────────────────────────────────────────
       - name: Install Python tools
         run: |
@@ -107,48 +107,37 @@ jobs:
           pip install -q "aider-chat[playwright]"
 
       # ─────────────────────────────────────────────
-      # 5. NODE TOOLS + PLAYWRIGHT BROWSER
-      #    FIX: @playwright/mcp is the correct package.
-      #    npx playwright install covers the browser
-      #    used by BOTH the MCP server AND aider's own
-      #    playwright scraping fallback.
+      # 5. NODE TOOLS + PLAYWRIGHT BROWSERS
+      #    Install Chromium for BOTH:
+      #      • npx  → used by @playwright/mcp server
+      #      • python -m playwright → used by aider's
+      #        own built-in scraping fallback
+      #    Both must be pre-installed so nothing
+      #    auto-installs mid-run and races MCP startup.
       # ─────────────────────────────────────────────
-      - name: Install Node tools and Playwright browser
+      - name: Install Node tools and Playwright browsers
         run: |
           npm install -g @playwright/mcp@latest
-          # Install Chromium for aider's own playwright module too
           npx playwright install chromium --with-deps
           python -m playwright install chromium --with-deps
 
       # ─────────────────────────────────────────────
-      # 6. ATOMIC BOOTSTRAP
+      # 6. ATOMIC BOOTSTRAP — one shell, strict order:
+      #      A) git config + checkout -b
+      #      B) write every file
+      #      C) git add + commit
       #
-      #  ONE shell, strict serial order:
-      #    A) git config + checkout -b
-      #    B) write every file
-      #    C) git add + commit
-      #
-      #  KEY FIXES IN THIS STEP:
-      #
-      #  FIX 1 — MCP config named kawaii-mcp.json
-      #    Aider automatically gitignores everything
-      #    matching .aider* on first run. If the MCP
-      #    config is called .aider.mcp.json it gets
-      #    gitignored and aider may not load it.
-      #    Naming it kawaii-mcp.json sidesteps this,
-      #    and we pass it explicitly via --mcp-config.
-      #
-      #  FIX 2 — No placeholder URLs in the prompt
-      #    Previous prompt contained literal strings:
-      #      https://pypi.org/pypi/<pkg>/json
-      #      https://crates.io/api/v1/crates/<crate>
-      #    Aider treated these as real URLs, triggered
-      #    its web scraper, and wasted the entire
-      #    context window before writing a single file.
-      #    All such example URLs are removed.
-      #
-      #  FIX 3 — Python script written to /tmp first
-      #    Avoids heredoc-inside-heredoc quoting hell.
+      #  KEY FIXES:
+      #  • MCP config named .aider.mcp.json (the exact
+      #    hardcoded filename aider auto-detects).
+      #  • --no-gitignore + --no-add-gitignore-files
+      #    are added to the aider call (step 7) so
+      #    aider never touches .gitignore and never
+      #    buries .aider.mcp.json.
+      #  • No placeholder URLs in the prompt — they
+      #    triggered aider's URL scraper last run.
+      #  • Python script written to /tmp first to avoid
+      #    heredoc-inside-heredoc quoting problems.
       # ─────────────────────────────────────────────
       - name: Bootstrap — branch, write files, commit
         env:
@@ -190,10 +179,13 @@ jobs:
           Every file you produce must be complete and ready for production.
           PERSONA_EOF
 
-          # ── B-3) kawaii-mcp.json ────────────────────────────────────
-          # FIX: NOT named .aider.mcp.json — aider gitignores .aider*
-          # on first run. Use an explicit name + --mcp-config flag.
-          cat > kawaii-mcp.json << 'MCP_EOF'
+          # ── B-3) .aider.mcp.json ────────────────────────────────────
+          # MUST be named exactly .aider.mcp.json — that is the
+          # hardcoded filename aider auto-detects. No --mcp-config
+          # flag exists in aider v0.86.x.
+          # --no-gitignore + --no-add-gitignore-files (in step 7)
+          # prevent aider from ever burying this file in .gitignore.
+          cat > .aider.mcp.json << 'MCP_EOF'
           {
             "mcpServers": {
               "playwright": {
@@ -213,11 +205,13 @@ jobs:
             }
           }
           MCP_EOF
-          echo "=== kawaii-mcp.json ===" && cat kawaii-mcp.json
+          echo "=== .aider.mcp.json ===" && cat .aider.mcp.json
 
           # ── B-4) AIDER_PROMPT.md via /tmp script ────────────────────
-          # FIX: no placeholder URLs (they triggered aider's web
-          # scraper and consumed the entire context window).
+          # Written via a /tmp Python script — no heredoc nesting.
+          # IMPORTANT: zero placeholder URLs in this prompt.
+          # Any URL-shaped string causes aider to invoke its scraper
+          # and consume the entire context budget before coding starts.
           cat > /tmp/gen_prompt.py << 'PYSCRIPT_EOF'
           import os, textwrap
 
@@ -236,20 +230,21 @@ jobs:
           working in ANY programming language and framework.
 
           ── PHASE 1 · RESEARCH ─────────────────────────────────────────
-          Before writing any code use the MCP tools to verify every library,
-          API, and configuration option you intend to use.
+          Before writing any code, use the MCP tools to verify every
+          library, API, and configuration option you intend to use.
 
-          Use the playwright MCP tool (browser_navigate, browser_snapshot):
-            • Navigate to https://duckduckgo.com and search for each library.
-            • Navigate to the official documentation site for each library.
-            • Take a snapshot and read the current API surface carefully.
-            • Confirm exact class names, function signatures, parameter names.
+          Use the playwright MCP tool with browser_navigate and
+          browser_snapshot to:
+            • Search DuckDuckGo for each dependency you plan to use.
+            • Navigate to the official documentation site for each one.
+            • Read the current API surface to confirm exact class names,
+              function signatures, and parameter names.
+            • Check PyPI, crates.io, or npmjs.com for current versions.
 
-          Use the fetch MCP tool to retrieve package metadata:
-            • For Python packages query the PyPI JSON API by constructing
-              a URL with the real package name, for example pandas or flask.
-            • For Rust crates query the crates.io API with the real crate name.
-            • Never request a URL containing angle-bracket placeholders.
+          Use the fetch MCP tool to retrieve raw package metadata:
+            • Query the PyPI JSON API using the real package name.
+            • Query the crates.io API using the real crate name.
+            • Never fetch a URL that contains angle-bracket placeholders.
 
           Never assume or hallucinate — verify every detail before coding.
 
@@ -270,12 +265,12 @@ jobs:
             never intimidates elderly users.
 
           ── PHASE 3 · validate.sh ──────────────────────────────────────
-          Create (or update) validate.sh at the repo root:
-            1. Install / sync all dependencies.
-            2. Compile / build the project.
+          Create or update validate.sh at the repo root:
+            1. Install and sync all dependencies.
+            2. Compile or build the project.
             3. Run every test suite.
             4. Run linters and static-analysis tools.
-            5. Exit 0 ONLY when every prior step passes.
+            5. Exit 0 only when every prior step passes.
           The script must be fully self-contained — CI runs it cold.
 
           ── PHASE 4 · RUN ──────────────────────────────────────────────
@@ -297,46 +292,55 @@ jobs:
           with open("AIDER_PROMPT.md", "w") as fh:
               fh.write(prompt + "\n")
 
-          print("AIDER_PROMPT.md written OK")
-          print(f"  {len(prompt)} chars, {len(prompt.splitlines())} lines")
+          print(f"AIDER_PROMPT.md written: {len(prompt)} chars, "
+                f"{len(prompt.splitlines())} lines")
           PYSCRIPT_EOF
 
           python3 /tmp/gen_prompt.py
           rm /tmp/gen_prompt.py
 
           # ── C) Stage and commit every file ─────────────────────────
-          git add README.md PROMPT.md kawaii-mcp.json AIDER_PROMPT.md
+          git add README.md PROMPT.md .aider.mcp.json AIDER_PROMPT.md
           git diff --cached --quiet \
             || git commit -m "chore: KawaiiForge bootstrap files [skip ci]"
 
           echo ""
           echo "=== Bootstrap complete ==="
           git log --oneline -5
+          echo ""
           ls -lah
 
       # ─────────────────────────────────────────────
       # 7. KAWAIIFORGE AUTONOMOUS BUILD LOOP
       #
-      #  KEY FIXES IN THIS STEP:
+      #  FLAGS — every one verified against the usage
+      #  output printed by aider v0.86.2:
       #
-      #  FIX 1 — --mcp-config kawaii-mcp.json
-      #    Previously omitted entirely. Without this
-      #    explicit flag aider may not load MCP at all
-      #    depending on version, and definitely won't
-      #    if the config file was gitignored.
+      #  --no-gitignore
+      #      Prevents aider from appending .aider* to
+      #      .gitignore, which would bury .aider.mcp.json
+      #      and break MCP loading.
       #
-      #  FIX 2 — --no-gitignore
-      #    Prevents aider from appending .aider* rules
-      #    to .gitignore mid-run, which could interfere
-      #    with config file visibility.
+      #  --no-add-gitignore-files
+      #      Secondary guard: prevents aider from adding
+      #      ANY files to .gitignore during the run.
       #
-      #  FIX 3 — --map-tokens 2048
-      #    Aider itself warns that > 2048 confuses LLMs
-      #    with too much irrelevant context. Reduced.
+      #  --no-detect-urls
+      #      CRITICAL: prevents aider from scraping any
+      #      URLs it finds in the prompt or in files.
+      #      This is what caused the entire context to be
+      #      burned on placeholder URLs last run.
       #
-      #  FIX 4 — --no-show-model-warnings
-      #    Suppresses the "unknown context window" noise
-      #    so real errors are visible in the log.
+      #  --no-show-model-warnings
+      #      Suppresses "unknown context window" noise.
+      #
+      #  --map-tokens 2048
+      #      Aider's own warning says > 2048 confuses LLMs.
+      #
+      #  REMOVED --mcp-config
+      #      This flag does NOT exist in aider v0.86.2.
+      #      The usage output confirms it. Aider reads
+      #      .aider.mcp.json automatically by filename.
       # ─────────────────────────────────────────────
       - name: KawaiiForge — Autonomous Build Loop
         env:
@@ -344,17 +348,18 @@ jobs:
           OPENAI_API_BASE: "https://api.novita.ai/openai/v1"
         run: |
           aider \
-            --model                 "openai/inclusionai/ling-2.6-1t" \
-            --openai-api-base       "${OPENAI_API_BASE}" \
-            --mcp-config            kawaii-mcp.json \
+            --model                   "openai/inclusionai/ling-2.6-1t" \
+            --openai-api-base         "${OPENAI_API_BASE}" \
             --yes-always \
             --auto-commits \
             --no-auto-lint \
             --no-check-update \
             --no-gitignore \
+            --no-add-gitignore-files \
+            --no-detect-urls \
             --no-show-model-warnings \
-            --map-tokens            2048 \
-            --message-file          AIDER_PROMPT.md \
+            --map-tokens              2048 \
+            --message-file            AIDER_PROMPT.md \
             PROMPT.md
 
       # ─────────────────────────────────────────────
