@@ -70,11 +70,7 @@ jobs:
 
       # ─────────────────────────────────────────────
       # 3. SYSTEM DEPENDENCIES
-      #    Ubuntu 24.04 (noble) Y2038 renames:
-      #      libasound2        → libasound2t64
-      #      libatk1.0-0       → libatk1.0-0t64
-      #      libatk-bridge2.0  → libatk-bridge2.0-0t64
-      #      libcups2          → libcups2t64
+      #    Ubuntu 24.04 Y2038 renames applied.
       # ─────────────────────────────────────────────
       - name: Install system dependencies
         run: |
@@ -98,34 +94,61 @@ jobs:
             golang-go rustc cargo default-jdk
 
       # ─────────────────────────────────────────────
-      # 4. PYTHON & NODE TOOLING
+      # 4. PYTHON TOOLS
+      #    Install uv first — uvx must be on $PATH
+      #    before the MCP server config references it.
+      #    aider[playwright] covers built-in scraping
+      #    fallback AND the MCP browser extras.
       # ─────────────────────────────────────────────
       - name: Install Python tools
         run: |
           pip install -q --upgrade pip
           pip install -q uv
-          pip install -q "aider-chat[help,browser]"
+          pip install -q "aider-chat[playwright]"
 
+      # ─────────────────────────────────────────────
+      # 5. NODE TOOLS + PLAYWRIGHT BROWSER
+      #    FIX: @playwright/mcp is the correct package.
+      #    npx playwright install covers the browser
+      #    used by BOTH the MCP server AND aider's own
+      #    playwright scraping fallback.
+      # ─────────────────────────────────────────────
       - name: Install Node tools and Playwright browser
         run: |
           npm install -g @playwright/mcp@latest
+          # Install Chromium for aider's own playwright module too
           npx playwright install chromium --with-deps
+          python -m playwright install chromium --with-deps
 
       # ─────────────────────────────────────────────
-      # 5. ATOMIC BOOTSTRAP
+      # 6. ATOMIC BOOTSTRAP
       #
-      #    THE FIX: one single shell block, strict order:
-      #      A) git config
-      #      B) git checkout -b          ← branch exists
-      #      C) write every file         ← files exist on branch
-      #      D) git add + git commit     ← guaranteed to find files
+      #  ONE shell, strict serial order:
+      #    A) git config + checkout -b
+      #    B) write every file
+      #    C) git add + commit
       #
-      #    Splitting these across steps caused the runner to
-      #    execute git-add before files were written.
-      #    One step = one shell = guaranteed serial execution.
+      #  KEY FIXES IN THIS STEP:
       #
-      #    Python writes AIDER_PROMPT.md via a script file
-      #    (not a heredoc-inside-heredoc) to avoid quoting issues.
+      #  FIX 1 — MCP config named kawaii-mcp.json
+      #    Aider automatically gitignores everything
+      #    matching .aider* on first run. If the MCP
+      #    config is called .aider.mcp.json it gets
+      #    gitignored and aider may not load it.
+      #    Naming it kawaii-mcp.json sidesteps this,
+      #    and we pass it explicitly via --mcp-config.
+      #
+      #  FIX 2 — No placeholder URLs in the prompt
+      #    Previous prompt contained literal strings:
+      #      https://pypi.org/pypi/<pkg>/json
+      #      https://crates.io/api/v1/crates/<crate>
+      #    Aider treated these as real URLs, triggered
+      #    its web scraper, and wasted the entire
+      #    context window before writing a single file.
+      #    All such example URLs are removed.
+      #
+      #  FIX 3 — Python script written to /tmp first
+      #    Avoids heredoc-inside-heredoc quoting hell.
       # ─────────────────────────────────────────────
       - name: Bootstrap — branch, write files, commit
         env:
@@ -133,14 +156,12 @@ jobs:
           MAX_ITERATIONS: ${{ github.event.inputs.max_fix_iterations }}
           RUN_ID:         ${{ github.run_id }}
         run: |
-          # ── A) Git identity ────────────────────────────────────────
+          # ── A) Git identity + feature branch ───────────────────────
           git config user.name  "kawaiiforge-bot"
           git config user.email "kawaiiforge@ci.local"
-
-          # ── B) Create feature branch ───────────────────────────────
           git checkout -b "kawaiiforge/${RUN_ID}"
 
-          # ── C-1) README.md ─────────────────────────────────────────
+          # ── B-1) README.md ──────────────────────────────────────────
           cat > README.md << 'README_EOF'
           # 🌸 KawaiiForge
 
@@ -153,7 +174,7 @@ jobs:
           See `validate.sh` for build / test / lint instructions.
           README_EOF
 
-          # ── C-2) PROMPT.md ─────────────────────────────────────────
+          # ── B-2) PROMPT.md ──────────────────────────────────────────
           cat > PROMPT.md << 'PERSONA_EOF'
           You are KawaiiForge — a world-class, gentle, and extremely thorough
           full-stack engineer who specialises in joyful, accessible,
@@ -169,8 +190,10 @@ jobs:
           Every file you produce must be complete and ready for production.
           PERSONA_EOF
 
-          # ── C-3) .aider.mcp.json ───────────────────────────────────
-          cat > .aider.mcp.json << 'MCP_EOF'
+          # ── B-3) kawaii-mcp.json ────────────────────────────────────
+          # FIX: NOT named .aider.mcp.json — aider gitignores .aider*
+          # on first run. Use an explicit name + --mcp-config flag.
+          cat > kawaii-mcp.json << 'MCP_EOF'
           {
             "mcpServers": {
               "playwright": {
@@ -190,10 +213,11 @@ jobs:
             }
           }
           MCP_EOF
+          echo "=== kawaii-mcp.json ===" && cat kawaii-mcp.json
 
-          # ── C-4) AIDER_PROMPT.md via Python script file ────────────
-          # Write the generator to a temp file first — this avoids the
-          # "heredoc inside heredoc" quoting nightmare entirely.
+          # ── B-4) AIDER_PROMPT.md via /tmp script ────────────────────
+          # FIX: no placeholder URLs (they triggered aider's web
+          # scraper and consumed the entire context window).
           cat > /tmp/gen_prompt.py << 'PYSCRIPT_EOF'
           import os, textwrap
 
@@ -212,36 +236,36 @@ jobs:
           working in ANY programming language and framework.
 
           ── PHASE 1 · RESEARCH ─────────────────────────────────────────
-          Before touching a single source file, use the MCP tools to verify
-          every library, API, and configuration option you intend to use.
+          Before writing any code use the MCP tools to verify every library,
+          API, and configuration option you intend to use.
 
-          Playwright MCP  (browser_navigate / browser_snapshot / browser_click):
-            • Search DuckDuckGo for every dependency.
-            • Navigate to official docs and snapshot pages to confirm exact
-              function signatures, class names, and config keys.
-            • Check PyPI / crates.io / npmjs.com for current version numbers.
+          Use the playwright MCP tool (browser_navigate, browser_snapshot):
+            • Navigate to https://duckduckgo.com and search for each library.
+            • Navigate to the official documentation site for each library.
+            • Take a snapshot and read the current API surface carefully.
+            • Confirm exact class names, function signatures, parameter names.
 
-          Fetch MCP  (fetch):
-            • Raw PyPI JSON  : https://pypi.org/pypi/<pkg>/json
-            • Crates metadata: https://crates.io/api/v1/crates/<crate>
-            • Plain-text READMEs or changelogs for extra detail.
+          Use the fetch MCP tool to retrieve package metadata:
+            • For Python packages query the PyPI JSON API by constructing
+              a URL with the real package name, for example pandas or flask.
+            • For Rust crates query the crates.io API with the real crate name.
+            • Never request a URL containing angle-bracket placeholders.
 
-          Never hallucinate or assume — verify everything first.
+          Never assume or hallucinate — verify every detail before coding.
 
           ── PHASE 2 · IMPLEMENT ────────────────────────────────────────
           Produce a complete, production-grade project:
           • All source files — zero stubs, zero TODOs, zero placeholders.
-          • Correct build system for the chosen stack
-            (pyproject.toml + uv, Cargo.toml, CMakeLists.txt, package.json…).
-          • Comprehensive automated test suite (pytest / cargo test / jest…).
+          • Correct build system for the chosen stack.
+          • Comprehensive automated test suite.
           • Security: sanitise all inputs, limit upload sizes, set secure
             headers, prevent path traversal.
           • Full structured logging and error handling throughout.
           • Accessibility: ARIA labels, keyboard nav, skip-links,
             high-contrast colours, minimum 18 pt body font.
-          • Kawaii UI (when the task has a UI):
-            pastel pinks/blues/lavenders, sakura motifs, large friendly
-            buttons, cute SVG animal/flower icons, 3-step wizard flow,
+          • Kawaii UI when the task involves a user interface:
+            pastel pinks, blues, lavenders, sakura motifs, large friendly
+            buttons with cute SVG animal/flower icons, 3-step wizard flow,
             drag-and-drop with clear visual feedback, joyful copy that
             never intimidates elderly users.
 
@@ -260,10 +284,9 @@ jobs:
           ── PHASE 5 · FIX LOOP ─────────────────────────────────────────
           If validate.sh exits non-zero:
           • Read every error line carefully.
-          • Use playwright/fetch MCP to research the root cause if needed.
-          • Apply a precise surgical fix — never silence errors with bare
-            except or || true unless genuinely non-fatal.
-          • Commit the fix with a clear, descriptive message.
+          • Research the root cause via MCP tools if needed.
+          • Apply a precise surgical fix.
+          • Commit the fix with a descriptive message.
           • Return to PHASE 4.
 
           Repeat until validate.sh exits 0.
@@ -274,29 +297,46 @@ jobs:
           with open("AIDER_PROMPT.md", "w") as fh:
               fh.write(prompt + "\n")
 
-          print("AIDER_PROMPT.md written successfully.")
-          print(f"Length: {{len(prompt)}} characters, {{len(prompt.splitlines())}} lines.")
+          print("AIDER_PROMPT.md written OK")
+          print(f"  {len(prompt)} chars, {len(prompt.splitlines())} lines")
           PYSCRIPT_EOF
 
           python3 /tmp/gen_prompt.py
           rm /tmp/gen_prompt.py
 
-          # ── D) Stage and commit every file ─────────────────────────
-          # All four files now provably exist in the working tree.
-          git add README.md PROMPT.md .aider.mcp.json AIDER_PROMPT.md
-
+          # ── C) Stage and commit every file ─────────────────────────
+          git add README.md PROMPT.md kawaii-mcp.json AIDER_PROMPT.md
           git diff --cached --quiet \
             || git commit -m "chore: KawaiiForge bootstrap files [skip ci]"
 
           echo ""
-          echo "=== Bootstrap complete — git log ==="
+          echo "=== Bootstrap complete ==="
           git log --oneline -5
-          echo ""
-          echo "=== Working tree ==="
           ls -lah
 
       # ─────────────────────────────────────────────
-      # 6. KAWAIIFORGE AUTONOMOUS BUILD LOOP
+      # 7. KAWAIIFORGE AUTONOMOUS BUILD LOOP
+      #
+      #  KEY FIXES IN THIS STEP:
+      #
+      #  FIX 1 — --mcp-config kawaii-mcp.json
+      #    Previously omitted entirely. Without this
+      #    explicit flag aider may not load MCP at all
+      #    depending on version, and definitely won't
+      #    if the config file was gitignored.
+      #
+      #  FIX 2 — --no-gitignore
+      #    Prevents aider from appending .aider* rules
+      #    to .gitignore mid-run, which could interfere
+      #    with config file visibility.
+      #
+      #  FIX 3 — --map-tokens 2048
+      #    Aider itself warns that > 2048 confuses LLMs
+      #    with too much irrelevant context. Reduced.
+      #
+      #  FIX 4 — --no-show-model-warnings
+      #    Suppresses the "unknown context window" noise
+      #    so real errors are visible in the log.
       # ─────────────────────────────────────────────
       - name: KawaiiForge — Autonomous Build Loop
         env:
@@ -304,19 +344,22 @@ jobs:
           OPENAI_API_BASE: "https://api.novita.ai/openai/v1"
         run: |
           aider \
-            --model           "openai/inclusionai/ling-2.6-1t" \
-            --openai-api-base "${OPENAI_API_BASE}" \
+            --model                 "openai/inclusionai/ling-2.6-1t" \
+            --openai-api-base       "${OPENAI_API_BASE}" \
+            --mcp-config            kawaii-mcp.json \
             --yes-always \
             --auto-commits \
             --no-auto-lint \
             --no-check-update \
-            --map-tokens      4096 \
-            --message-file    AIDER_PROMPT.md \
+            --no-gitignore \
+            --no-show-model-warnings \
+            --map-tokens            2048 \
+            --message-file          AIDER_PROMPT.md \
             PROMPT.md
 
       # ─────────────────────────────────────────────
-      # 7. VERIFY AGENT PRODUCED COMMITS
-      #    Guard > 1 accounts for the bootstrap commit.
+      # 8. VERIFY AGENT PRODUCED COMMITS
+      #    Guard > 1 accounts for bootstrap commit.
       # ─────────────────────────────────────────────
       - name: Verify agent produced commits
         run: |
@@ -328,7 +371,7 @@ jobs:
           fi
 
       # ─────────────────────────────────────────────
-      # 8. FINAL COLD VALIDATION RUN
+      # 9. FINAL COLD VALIDATION RUN
       # ─────────────────────────────────────────────
       - name: Final validation run
         run: |
@@ -342,7 +385,7 @@ jobs:
           echo "════════════ validate.sh exited 0 ✅ ════════════"
 
       # ─────────────────────────────────────────────
-      # 9. OPTIONAL SAST (C/C++ projects only)
+      # 10. OPTIONAL SAST (C/C++ only)
       # ─────────────────────────────────────────────
       - name: SAST — cppcheck (C/C++ projects only)
         if: always()
@@ -352,7 +395,6 @@ jobs:
             \( -name '*.cpp' -o -name '*.cxx' \
                -o -name '*.h'  -o -name '*.hpp' \) \
             2>/dev/null || true)
-
           if [ -n "$CPP_FILES" ]; then
             echo "Running cppcheck..."
             # shellcheck disable=SC2086
@@ -369,7 +411,7 @@ jobs:
           fi
 
       # ─────────────────────────────────────────────
-      # 10. SHIP — PUSH BRANCH & OPEN PR
+      # 11. SHIP — PUSH BRANCH & OPEN PR
       # ─────────────────────────────────────────────
       - name: Push branch and open pull request
         if: success()
