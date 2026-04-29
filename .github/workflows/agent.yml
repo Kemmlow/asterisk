@@ -1,9 +1,10 @@
 # ╔══════════════════════════════════════════════════════════════════╗
-# ║              Forge: Aider + Novita AI  (v3 — unlimited)         ║
+# ║              Forge: Aider + Novita AI  (v4 — playwright MCP)    ║
+# ║  • @playwright/mcp  — zero API keys, fully local, headless      ║
+# ║  • mcp-server-fetch — lightweight fallback fetcher              ║
 # ║  • 3-hour hard ceiling                                           ║
 # ║  • Zero token limits (unlimited Novita API)                      ║
 # ║  • ling-2.6-1t hardcoded                                         ║
-# ║  • Brave Search MCP + mcp-server-fetch for grounding             ║
 # ║  • SAST lint gate (cppcheck) before PR                           ║
 # ╚══════════════════════════════════════════════════════════════════╝
 name: "Forge: Aider + Novita AI"
@@ -31,7 +32,7 @@ concurrency:
 jobs:
   forge:
     runs-on: ubuntu-latest
-    timeout-minutes: 180          # ← 3 hours hard ceiling
+    timeout-minutes: 180           # ← 3 hours hard ceiling
     permissions:
       contents: write
       pull-requests: write
@@ -51,7 +52,7 @@ jobs:
         with:
           python-version: '3.12'
 
-      # ── 3. Node 20 (required for npx MCP servers) ────────────────
+      # ── 3. Node 20 (required for npx @playwright/mcp) ───────────
       - name: Set up Node 20
         uses: actions/setup-node@v4
         with:
@@ -64,7 +65,12 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential cmake ninja-build \
             libssl-dev libsodium-dev \
-            cppcheck
+            cppcheck \
+            # Playwright/Chromium runtime deps on Ubuntu
+            libnss3 libatk1.0-0 libatk-bridge2.0-0 \
+            libcups2 libdrm2 libxkbcommon0 libxcomposite1 \
+            libxdamage1 libxfixes3 libxrandr2 libgbm1 \
+            libasound2
 
       # ── 5. Python deps ──────────────────────────────────────────
       - name: Install Python dependencies
@@ -72,13 +78,15 @@ jobs:
           pip install -q --upgrade pip
           pip install -q aider-chat uv
 
-      # ── 6. Pre-warm MCP packages ─────────────────────────────────
-      - name: Pre-warm Brave Search MCP
-        if: ${{ secrets.BRAVE_API_KEY != '' }}
-        env:
-          BRAVE_API_KEY: ${{ secrets.BRAVE_API_KEY }}
+      # ── 6. Install Playwright + Chromium (no API key needed) ─────
+      #    We install the package globally so npx can find it fast,
+      #    then pull only Chromium — smallest footprint for headless CI.
+      - name: Install Playwright MCP + Chromium browser
         run: |
-          npx -y @modelcontextprotocol/server-brave-search --help 2>/dev/null || true
+          npm install -g @playwright/mcp@latest
+          # Install only Chromium — Firefox/WebKit not needed in CI
+          npx playwright install chromium --with-deps
+          echo "::notice::Playwright + Chromium installed successfully."
 
       # ── 7. Validate secrets ──────────────────────────────────────
       - name: Validate secrets
@@ -87,27 +95,29 @@ jobs:
             echo "::error::NOVITA_API_KEY is not set. Aborting."
             exit 1
           fi
-          if [ -z "${{ secrets.BRAVE_API_KEY }}" ]; then
-            echo "::warning::BRAVE_API_KEY not set — Brave Search MCP disabled, fetch-only mode active."
-          else
-            echo "::notice::Brave Search MCP + fetch MCP both enabled."
-          fi
+          echo "::notice::Playwright MCP active (no API key required)."
 
       # ── 8. Write .aider.mcp.json ─────────────────────────────────
+      #    TWO local servers — both zero API keys:
+      #      ① @playwright/mcp   → full browser: navigate, search, fetch,
+      #                            JS execution, accessibility snapshots
+      #      ② mcp-server-fetch  → lightweight plain HTTP fallback
+      #
+      #    --headless is critical: GitHub Actions has no display server.
+      #    --no-sandbox required for Chromium inside a container/CI env.
       - name: Write .aider.mcp.json
-        env:
-          BRAVE_API_KEY: ${{ secrets.BRAVE_API_KEY }}
         run: |
-          if [ -n "$BRAVE_API_KEY" ]; then
-            cat > .aider.mcp.json << EOF
+          cat > .aider.mcp.json << 'EOF'
           {
             "mcpServers": {
-              "brave-search": {
+              "playwright": {
                 "command": "npx",
-                "args": ["-y", "@modelcontextprotocol/server-brave-search"],
-                "env": {
-                  "BRAVE_API_KEY": "$BRAVE_API_KEY"
-                }
+                "args": [
+                  "@playwright/mcp@latest",
+                  "--headless",
+                  "--no-sandbox",
+                  "--browser=chromium"
+                ]
               },
               "fetch": {
                 "command": "uvx",
@@ -116,18 +126,6 @@ jobs:
             }
           }
           EOF
-          else
-            cat > .aider.mcp.json << 'EOF'
-          {
-            "mcpServers": {
-              "fetch": {
-                "command": "uvx",
-                "args": ["mcp-server-fetch"]
-              }
-            }
-          }
-          EOF
-          fi
           echo "--- .aider.mcp.json ---"
           cat .aider.mcp.json
 
@@ -136,7 +134,6 @@ jobs:
         env:
           OPENAI_API_KEY:  ${{ secrets.NOVITA_API_KEY }}
           OPENAI_API_BASE: "https://api.novita.ai/openai/v1"
-          BRAVE_API_KEY:   ${{ secrets.BRAVE_API_KEY }}
           MAX_ITERATIONS:  ${{ github.event.inputs.max_fix_iterations }}
           TASK:            ${{ github.event.inputs.task_description }}
         run: |
@@ -152,7 +149,7 @@ jobs:
           cryptography and OS-level programming experience.
           You write ONLY complete, compilable, production-grade code.
           You NEVER write pseudo-code, TODOs, stubs, or placeholder comments.
-          You verify every API signature before using it via MCP web search.
+          You verify every API signature before using it via MCP browser search.
           SKILL_EOF
           )
 
@@ -172,57 +169,85 @@ jobs:
           TASK  : $TASK
           ════════════════════════════════════════════════════════════
 
-          ██████████████ MCP TOOL USAGE — MANDATORY ██████████████████
-          You have TWO MCP servers connected and active right now:
+          ██████████ MCP TOOL USAGE — MANDATORY ██████████████████████
+          You have TWO MCP servers connected and active RIGHT NOW.
+          Both require ZERO API keys and are fully local:
 
-            ① brave-search  → call brave_web_search to look up:
-                - Any C++ stdlib or library API you are not 100% sure of
-                - OpenSSL EVP docs, libsodium crypto_aead_* docs
-                - Compiler error messages you cannot immediately explain
-                - CMake find_package() module names
-                - CVE / security advisories for every algorithm used
+            ① playwright  (primary — full browser, use this for search)
+               Tools available:
+               • browser_navigate  → open any URL in headless Chromium
+               • browser_snapshot  → read the page as an accessibility tree
+               • browser_click     → click search results, links, buttons
+               • browser_type      → type into search boxes
+               • browser_wait_for  → wait for dynamic content to load
 
-            ② fetch  → call fetch_url to pull exact content from:
-                - https://en.cppreference.com  (any page)
-                - https://docs.openssl.org
-                - https://libsodium.gitbook.io
+            ② fetch  (fallback — fast plain HTTP for known stable URLs)
+               Tools available:
+               • fetch_url → pull any public URL as plain text/markdown
+
+          ── HOW TO DO A WEB SEARCH (step by step) ───────────────────
+          Step 1  → browser_navigate to:
+                      https://www.google.com/search?q=YOUR+QUERY+HERE
+                    OR https://duckduckgo.com/?q=YOUR+QUERY+HERE
+                    (DuckDuckGo is more bot-friendly — prefer it)
+
+          Step 2  → browser_snapshot  to read the search results list
+
+          Step 3  → browser_click on the most relevant result link
+
+          Step 4  → browser_snapshot  to read the actual page content
+
+          Step 5  → ONLY then write code based on verified content
+
+          ── HOW TO FETCH A KNOWN URL DIRECTLY ───────────────────────
+          For cppreference, OpenSSL docs, libsodium docs — use fetch:
+            fetch_url("https://en.cppreference.com/w/cpp/...")
+            fetch_url("https://docs.openssl.org/...")
+            fetch_url("https://libsodium.gitbook.io/doc/...")
 
           ── MANDATORY SEARCH-BEFORE-CODE PROTOCOL ───────────────────
           BEFORE writing ANY function call you are not 100% certain of:
-            Step 1 → brave_web_search('<function> cppreference')
-            Step 2 → fetch_url(<top result URL>)
-            Step 3 → Read the exact signature from the fetched page
-            Step 4 → ONLY then write the code using that verified signature
+            1. DuckDuckGo search: '<function name> cppreference'
+            2. Navigate to the cppreference result
+            3. Read the EXACT function signature from the page
+            4. ONLY then write the code using that verified signature
 
-          NEVER invent function signatures, enum values, struct members,
-          macro names, or template parameters.
-          If search returns nothing → use the safest known alternative
+          NEVER invent:
+            • Function signatures or overloads
+            • Enum values or macro names
+            • CMake target names or find_package() module names
+            • Struct member names or template parameters
+
+          If a search returns nothing → use the safest known fallback
           and document exactly why in a code comment.
 
           ████████████ AUTONOMOUS EXECUTION CONTRACT ██████████████████
           YOU ARE IN FULLY AUTONOMOUS MODE.
-          THE API HAS NO TOKEN LIMIT — write every file in full,
-          every function completely, every code path explicitly.
-          DO NOT abbreviate. DO NOT ask for confirmation.
-          DO NOT summarise progress. DO NOT add TODO comments.
+          THE API HAS NO TOKEN LIMIT.
+          Write every file in full. Every function completely.
+          Every code path explicitly. DO NOT abbreviate anything.
+          DO NOT ask for confirmation. DO NOT summarise. 
+          DO NOT add TODO comments or placeholder stubs.
 
           ── PHASE 1 · RESEARCH ───────────────────────────────────────
-          • Search for the current stable API of every library you will use
-          • Verify CMake find_package() module names and target names
-          • Check for any deprecated APIs and find their modern replacements
-          • Only proceed to PHASE 2 after all APIs are confirmed
+          • DuckDuckGo search for the current stable API of EVERY library
+            you plan to use before writing a single line of code
+          • Search CMake find_package() module names and imported target
+            names — these are commonly wrong when hallucinated
+          • Search for deprecation notices on any API older than C++17
+          • Only proceed to PHASE 2 after all APIs are verified
 
           ── PHASE 2 · IMPLEMENT ──────────────────────────────────────
-          • Write EVERY file in full: all headers, all sources, CMakeLists.txt
-          • C++20 throughout: RAII, smart pointers, std::expected, concepts,
-            ranges, std::span, std::string_view — no raw owning pointers
+          • Write EVERY file in full: all headers, sources, CMakeLists.txt
+          • C++20 throughout: RAII, smart pointers, std::expected,
+            concepts, ranges, std::span, std::string_view
           • Zero placeholders · Zero TODOs · Zero stub functions
-          • Every happy path AND every error path fully implemented
-          • Secure coding: zeroize sensitive buffers, check all return values,
-            use constant-time comparison for MACs/tags
+          • Both happy path AND every error path fully implemented
+          • Secure coding: zeroize sensitive buffers on destruction,
+            check ALL return values, constant-time MAC comparison
 
           ── PHASE 3 · BUILD ──────────────────────────────────────────
-          Run EXACTLY this command and capture ALL output:
+          Run EXACTLY:
             rm -rf build && cmake -B build -G Ninja \
               -DCMAKE_BUILD_TYPE=Release \
               -DCMAKE_CXX_STANDARD=20 \
@@ -230,32 +255,33 @@ jobs:
               && cmake --build build --parallel
 
           ── PHASE 4 · EVALUATE ───────────────────────────────────────
-          cmake --build exits 0  →  SUCCESS. Stop immediately.
-          cmake --build exits ≠0 →  Go to PHASE 5 right now.
+          cmake exits 0  →  SUCCESS. STOP immediately.
+          cmake exits ≠0 →  PHASE 5 immediately.
 
           ── PHASE 5 · DIAGNOSE & FIX ─────────────────────────────────
-          Read EVERY error and warning line. For each one:
+          For EVERY error/warning line:
             error: use of undeclared identifier
-              → Search cppreference for the correct header and include it
-            error: no matching function
-              → fetch_url the cppreference page, read the exact overload set
+              → browser_navigate to DuckDuckGo, search the identifier,
+                find the correct header, add it
+            error: no matching function for call to X
+              → fetch_url the cppreference page for X, read exact overloads
             error: undefined reference to X
               → Add X's library to target_link_libraries in CMakeLists.txt
-            warning: unused parameter [-Wunused-parameter]
-              → Add [[maybe_unused]] or actually use the parameter
+                (search CMake docs if unsure of the imported target name)
+            warning: unused parameter
+              → [[maybe_unused]] or actually use it
             warning: narrowing conversion
-              → Add an explicit static_cast<> with a comment explaining safety
+              → explicit static_cast<> with a safety comment
             warning: deprecated
-              → brave_web_search for the modern replacement, use that instead
+              → DuckDuckGo search for the modern replacement
             ANY other diagnostic
-              → Fix the root cause. NEVER suppress with pragmas or casts
-                unless mathematically provable safe, and commented.
-          Commit ALL fixes in one commit with a clear message.
-          Return to PHASE 3.
+              → Fix the root cause. Never suppress with pragmas or casts
+                unless provably safe and commented.
+          Commit ALL fixes. Return to PHASE 3.
 
           ── PHASE 6 · REPEAT ─────────────────────────────────────────
           Loop PHASE 3 → 4 → 5 until PHASE 4 says SUCCESS.
-          Max iterations available: $MAX_ITERATIONS
+          Max iterations: $MAX_ITERATIONS
           YOU MUST NOT STOP until cmake exits with code 0."
 
           # ── Guard: fail loudly if aider made zero commits ─────────
@@ -289,7 +315,7 @@ jobs:
             --inline-suppr \
             $CPP_FILES \
           || {
-            echo "::error::cppcheck found issues. Fix them before merging."
+            echo "::error::cppcheck found issues. Fix before merging."
             exit 1
           }
 
@@ -303,7 +329,6 @@ jobs:
 
           BRANCH="forge/${{ github.run_id }}"
           git push -u origin "$BRANCH"
-
           COMMIT_COUNT=$(git rev-list --count origin/main..HEAD)
 
           gh pr create \
@@ -316,14 +341,16 @@ jobs:
           | **Agent**        | Aider (autonomous loop) |
           | **Model**        | inclusionai/ling-2.6-1t |
           | **Token limit**  | None (unlimited API) |
-          | **MCP Servers**  | brave-search · mcp-server-fetch |
+          | **MCP Servers**  | @playwright/mcp (headless Chromium) · mcp-server-fetch |
+          | **API keys**     | None required — fully local MCP |
           | **Commits**      | $COMMIT_COUNT |
           | **SAST**         | cppcheck passed |
           | **Timeout**      | 3 hours |
           | **Run**          | [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
 
-          > Brave Search MCP was active during generation — all API signatures
-          > were grounded against live documentation before use." \
+          > Playwright MCP (headless Chromium) was active during generation.
+          > The agent navigated DuckDuckGo and cppreference.com live to verify
+          > every API signature before writing code — no API key required." \
             --base main \
             --head "$BRANCH"
 
@@ -337,5 +364,5 @@ jobs:
           cat .aider.mcp.json || true
           echo "=== CMake error log ==="
           cat build/CMakeFiles/CMakeError.log 2>/dev/null || true
-          echo "=== cppcheck output ==="
-          cppcheck --version || true
+          echo "=== Playwright version ==="
+          npx playwright --version || true
