@@ -188,16 +188,18 @@ jobs:
                 "command": "uvx",
                 "args": ["mcp-server-fetch"]
               }
-            },
-            "autoshare":   False,
-            "autocompact": True
+            }
+            # FIX: Removed 'autoshare' and 'autocompact' as they are
+            # unrecognized keys in the current version of opencode-ai,
+            # which was causing a configuration validation error.
           }
 
           with open("opencode.json", "w") as f:
             json.dump(cfg, f, indent=2)
 
           safe = json.loads(json.dumps(cfg))
-          safe["provider"]["novita"]["options"]["apiKey"] = "***"
+          if "novita" in safe.get("provider", {}):
+              safe["provider"]["novita"]["options"]["apiKey"] = "***"
           print("=== opencode.json ===")
           print(json.dumps(safe, indent=2))
 
@@ -303,8 +305,6 @@ jobs:
           TASK: ${{ github.event.inputs.task }}
         run: |
           set -euo pipefail
-          # FIX: Removed the '-q' flag, which is not a valid option for 'opencode run'
-          # and was causing the command to fail by printing its help text.
           opencode run "
           ## YOUR MISSION
 
