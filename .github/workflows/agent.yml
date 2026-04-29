@@ -156,6 +156,9 @@ jobs:
           key   = os.environ["NOVITA_API_KEY"]
           model = os.environ.get("OC_MODEL", "novita/inclusionai/ling-2.6-1t")
 
+          # FIX: The schema for MCP configuration has changed.
+          # Each MCP now requires "enabled: true" and "type: 'local'"
+          # with the command and args nested inside.
           cfg = {
             "$schema": "https://opencode.ai/config.json",
             "model": model,
@@ -177,6 +180,8 @@ jobs:
             },
             "mcp": {
               "playwright": {
+                "enabled": True,
+                "type": "local",
                 "command": "npx",
                 "args": [
                   "@playwright/mcp@latest",
@@ -185,13 +190,12 @@ jobs:
                 ]
               },
               "fetch": {
+                "enabled": True,
+                "type": "local",
                 "command": "uvx",
                 "args": ["mcp-server-fetch"]
               }
             }
-            # FIX: Removed 'autoshare' and 'autocompact' as they are
-            # unrecognized keys in the current version of opencode-ai,
-            # which was causing a configuration validation error.
           }
 
           with open("opencode.json", "w") as f:
