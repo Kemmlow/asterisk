@@ -1,11 +1,10 @@
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║                    KawaiiForge: Autonomous AI Builder           ║
-# ║  • Fully autonomous agent for ANY language and ANY task         ║
-# ║  • Default task: Cute kawaii file converter for elderly staff   ║
-# ║  • Playwright MCP (local, zero API keys, headless Chromium)     ║
-# ║  • Research-before-code protocol to eliminate hallucinations    ║
-# ║  • Intelligent autonomous loop: research→implement→validate→fix ║
-# ║  • 3-hour timeout, unlimited tokens, ling-2.6-1t                ║
+# ║  • Replaced aider with opencode-ai (true autonomous agent)     ║
+# ║  • opencode run = headless non-interactive CI mode              ║
+# ║  • Custom OpenAI-compatible provider via opencode.json          ║
+# ║  • Playwright MCP + Fetch MCP built into opencode natively      ║
+# ║  • 3-hour timeout, ling-2.6-1t via Novita AI                   ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
 name: "KawaiiForge: Autonomous AI Builder"
@@ -56,7 +55,7 @@ jobs:
           fetch-depth: 0
 
       # ─────────────────────────────────────────────
-      # 2. LANGUAGE RUNTIMES
+      # 2. RUNTIMES
       # ─────────────────────────────────────────────
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -94,100 +93,97 @@ jobs:
             golang-go rustc cargo default-jdk
 
       # ─────────────────────────────────────────────
-      # 4. PYTHON TOOLS
-      #    uv first → uvx on $PATH before MCP starts.
-      #    aider[playwright] pre-installs the browser
-      #    scraping fallback so aider never auto-
-      #    installs anything mid-run.
+      # 4. INSTALL OPENCODE + PLAYWRIGHT MCP
+      #
+      #    opencode-ai  → the correct npm package name
+      #    @playwright/mcp → MCP server opencode uses
+      #    uvx / mcp-server-fetch → second MCP server
+      #
+      #    Playwright browsers installed for BOTH:
+      #      npx  → @playwright/mcp server
+      #      python -m playwright → fallback scraping
       # ─────────────────────────────────────────────
-      - name: Install Python tools
+      - name: Install opencode and tooling
         run: |
           pip install -q --upgrade pip
-          pip install -q uv
-          pip install -q "aider-chat[playwright]"
+          pip install -q uv playwright
 
-      # ─────────────────────────────────────────────
-      # 5. NODE TOOLS + PLAYWRIGHT BROWSERS
-      #    Install Chromium for BOTH:
-      #      • npx  → used by @playwright/mcp server
-      #      • python -m playwright → used by aider's
-      #        own built-in scraping fallback
-      #    Both must be pre-installed so nothing
-      #    auto-installs mid-run and races MCP startup.
-      # ─────────────────────────────────────────────
-      - name: Install Node tools and Playwright browsers
-        run: |
+          # opencode: the autonomous agent replacing aider
+          npm install -g opencode-ai@latest
+
+          # MCP servers opencode will use for research
           npm install -g @playwright/mcp@latest
+
+          # Chromium for both MCP server and python playwright
           npx playwright install chromium --with-deps
           python -m playwright install chromium --with-deps
 
+          echo "=== Versions ==="
+          opencode --version || true
+          node --version
+          python --version
+
       # ─────────────────────────────────────────────
-      # 6. ATOMIC BOOTSTRAP — one shell, strict order:
+      # 5. ATOMIC BOOTSTRAP
+      #    ONE shell — strict order:
       #      A) git config + checkout -b
-      #      B) write every file
-      #      C) git add + commit
-      #
-      #  KEY FIXES:
-      #  • MCP config named .aider.mcp.json (the exact
-      #    hardcoded filename aider auto-detects).
-      #  • --no-gitignore + --no-add-gitignore-files
-      #    are added to the aider call (step 7) so
-      #    aider never touches .gitignore and never
-      #    buries .aider.mcp.json.
-      #  • No placeholder URLs in the prompt — they
-      #    triggered aider's URL scraper last run.
-      #  • Python script written to /tmp first to avoid
-      #    heredoc-inside-heredoc quoting problems.
+      #      B) write opencode.json config
+      #      C) write AGENTS.md (opencode's native
+      #         instruction file, auto-loaded)
+      #      D) write KAWAII_PROMPT.md (full mission)
+      #      E) pre-authorise the Novita provider
+      #         (write auth.json directly — defence
+      #          against the known bug where options
+      #          are not forwarded to API calls)
+      #      F) git add + commit
       # ─────────────────────────────────────────────
       - name: Bootstrap — branch, write files, commit
         env:
           TASK:           ${{ github.event.inputs.task_description }}
           MAX_ITERATIONS: ${{ github.event.inputs.max_fix_iterations }}
           RUN_ID:         ${{ github.run_id }}
+          NOVITA_API_KEY: ${{ secrets.NOVITA_API_KEY }}
         run: |
-          # ── A) Git identity + feature branch ───────────────────────
+          # ── A) Git ─────────────────────────────────────────────────
           git config user.name  "kawaiiforge-bot"
           git config user.email "kawaiiforge@ci.local"
           git checkout -b "kawaiiforge/${RUN_ID}"
 
-          # ── B-1) README.md ──────────────────────────────────────────
-          cat > README.md << 'README_EOF'
-          # 🌸 KawaiiForge
-
-          Autonomously generated by **KawaiiForge** — a kawaii-style,
-          production-grade autonomous AI builder powered by:
-          * aider + ling-2.6-1t (via Novita AI)
-          * Playwright MCP  (`@playwright/mcp` headless Chromium)
-          * Fetch MCP       (`mcp-server-fetch`)
-
-          See `validate.sh` for build / test / lint instructions.
-          README_EOF
-
-          # ── B-2) PROMPT.md ──────────────────────────────────────────
-          cat > PROMPT.md << 'PERSONA_EOF'
-          You are KawaiiForge — a world-class, gentle, and extremely thorough
-          full-stack engineer who specialises in joyful, accessible,
-          production-grade software.
-
-          Your signature style is "kawaii engineering": clean, cute, empathetic
-          interfaces combined with rock-solid, secure, well-tested backend code.
-
-          You always research APIs and best practices with the available MCP
-          tools before writing any code.
-
-          You never use placeholders, TODOs, stubs, or abbreviated code.
-          Every file you produce must be complete and ready for production.
-          PERSONA_EOF
-
-          # ── B-3) .aider.mcp.json ────────────────────────────────────
-          # MUST be named exactly .aider.mcp.json — that is the
-          # hardcoded filename aider auto-detects. No --mcp-config
-          # flag exists in aider v0.86.x.
-          # --no-gitignore + --no-add-gitignore-files (in step 7)
-          # prevent aider from ever burying this file in .gitignore.
-          cat > .aider.mcp.json << 'MCP_EOF'
+          # ── B) opencode.json ────────────────────────────────────────
+          # Configures:
+          #   • Novita AI as a custom OpenAI-compatible provider
+          #   • ling-2.6-1t as the model for the build agent
+          #   • Playwright MCP + Fetch MCP servers
+          #   • Full bash permissions (required for autonomous build)
+          #   • Auto-compact on to handle long sessions
+          #
+          # DEFENCE against options-not-forwarded bug (#5674):
+          #   apiKey is set BOTH inside options{} AND via auth.json
+          #   (written in step E below).
+          cat > opencode.json << OCJSON_EOF
           {
-            "mcpServers": {
+            "\$schema": "https://opencode.ai/config.json",
+            "model": "novita/inclusionai/ling-2.6-1t",
+            "provider": {
+              "novita": {
+                "npm": "@ai-sdk/openai-compatible",
+                "name": "Novita AI",
+                "options": {
+                  "baseURL": "https://api.novita.ai/openai/v1",
+                  "apiKey": "${NOVITA_API_KEY}"
+                },
+                "models": {
+                  "inclusionai/ling-2.6-1t": {
+                    "name": "Ling 2.6 1T",
+                    "limit": {
+                      "context": 131072,
+                      "output": 16384
+                    }
+                  }
+                }
+              }
+            },
+            "mcp": {
               "playwright": {
                 "command": "npx",
                 "args": [
@@ -202,16 +198,45 @@ jobs:
                 "command": "uvx",
                 "args": ["mcp-server-fetch"]
               }
-            }
+            },
+            "autoshare": false,
+            "autocompact": true
           }
-          MCP_EOF
-          echo "=== .aider.mcp.json ===" && cat .aider.mcp.json
+          OCJSON_EOF
+          echo "=== opencode.json written ==="
+          cat opencode.json
 
-          # ── B-4) AIDER_PROMPT.md via /tmp script ────────────────────
-          # Written via a /tmp Python script — no heredoc nesting.
-          # IMPORTANT: zero placeholder URLs in this prompt.
-          # Any URL-shaped string causes aider to invoke its scraper
-          # and consume the entire context budget before coding starts.
+          # ── C) AGENTS.md ────────────────────────────────────────────
+          # opencode auto-loads AGENTS.md as the system context.
+          # This is the canonical way to give persistent instructions.
+          cat > AGENTS.md << 'AGENTS_EOF'
+          # KawaiiForge Agent Instructions
+
+          You are KawaiiForge — a world-class, gentle, and extremely thorough
+          full-stack engineer who specialises in joyful, accessible,
+          production-grade software.
+
+          ## Core identity
+          Your signature style is "kawaii engineering": clean, cute, empathetic
+          interfaces combined with rock-solid, secure, well-tested backend code.
+
+          ## Absolute rules
+          - NEVER use placeholders, TODOs, stubs, or abbreviated code.
+          - NEVER stop mid-task or ask for permission.
+          - NEVER summarise instead of implementing.
+          - Every file you produce must be complete and ready for production.
+          - Always verify library APIs with MCP tools before writing code.
+
+          ## Tool usage
+          - Use the playwright MCP tool to navigate documentation sites and
+            confirm exact API signatures before using any library.
+          - Use the fetch MCP tool to retrieve raw package metadata from
+            package registries using real package names only.
+          - Never construct URLs with angle-bracket placeholders.
+          AGENTS_EOF
+
+          # ── D) KAWAII_PROMPT.md ─────────────────────────────────────
+          # Written via a /tmp Python script to avoid heredoc nesting.
           cat > /tmp/gen_prompt.py << 'PYSCRIPT_EOF'
           import os, textwrap
 
@@ -219,152 +244,131 @@ jobs:
           max_iter = os.environ["MAX_ITERATIONS"]
 
           prompt = textwrap.dedent(f"""
-          You are KawaiiForge — read PROMPT.md for your full persona.
+          # KawaiiForge Mission
 
-          ═══════════════════════════ MISSION ═══════════════════════════
+          ## Task
           {task}
 
-          ═══════════════════ AUTONOMOUS AGENT PROTOCOL ══════════════════
+          ## Autonomous Agent Protocol
 
           You are a fully autonomous software-engineering agent capable of
           working in ANY programming language and framework.
 
-          ── PHASE 1 · RESEARCH ─────────────────────────────────────────
-          Before writing any code, use the MCP tools to verify every
-          library, API, and configuration option you intend to use.
+          ### PHASE 1 — RESEARCH
+          Before writing any code, use MCP tools to verify every library,
+          API, and configuration option you plan to use.
 
-          Use the playwright MCP tool with browser_navigate and
-          browser_snapshot to:
-            • Search DuckDuckGo for each dependency you plan to use.
-            • Navigate to the official documentation site for each one.
-            • Read the current API surface to confirm exact class names,
+          Playwright MCP (browser_navigate, browser_snapshot, browser_click):
+            - Search DuckDuckGo for each dependency.
+            - Navigate to official documentation sites.
+            - Read the current API surface and confirm exact class names,
               function signatures, and parameter names.
-            • Check PyPI, crates.io, or npmjs.com for current versions.
+            - Check package registries for current stable versions.
 
-          Use the fetch MCP tool to retrieve raw package metadata:
-            • Query the PyPI JSON API using the real package name.
-            • Query the crates.io API using the real crate name.
-            • Never fetch a URL that contains angle-bracket placeholders.
+          Fetch MCP:
+            - Retrieve raw package metadata from package registries using
+              real package names only (never angle-bracket placeholders).
 
           Never assume or hallucinate — verify every detail before coding.
 
-          ── PHASE 2 · IMPLEMENT ────────────────────────────────────────
+          ### PHASE 2 — IMPLEMENT
           Produce a complete, production-grade project:
-          • All source files — zero stubs, zero TODOs, zero placeholders.
-          • Correct build system for the chosen stack.
-          • Comprehensive automated test suite.
-          • Security: sanitise all inputs, limit upload sizes, set secure
+          - All source files with zero stubs, zero TODOs, zero placeholders.
+          - Correct build system for the chosen stack.
+          - Comprehensive automated test suite.
+          - Security: sanitise all inputs, limit upload sizes, set secure
             headers, prevent path traversal.
-          • Full structured logging and error handling throughout.
-          • Accessibility: ARIA labels, keyboard nav, skip-links,
-            high-contrast colours, minimum 18 pt body font.
-          • Kawaii UI when the task involves a user interface:
+          - Full structured logging and error handling throughout.
+          - Accessibility: ARIA labels, keyboard nav, skip-links,
+            high-contrast colours, minimum 18pt body font.
+          - Kawaii UI (when the task involves a user interface):
             pastel pinks, blues, lavenders, sakura motifs, large friendly
             buttons with cute SVG animal/flower icons, 3-step wizard flow,
             drag-and-drop with clear visual feedback, joyful copy that
             never intimidates elderly users.
 
-          ── PHASE 3 · validate.sh ──────────────────────────────────────
-          Create or update validate.sh at the repo root:
-            1. Install and sync all dependencies.
-            2. Compile or build the project.
-            3. Run every test suite.
-            4. Run linters and static-analysis tools.
-            5. Exit 0 only when every prior step passes.
+          ### PHASE 3 — validate.sh
+          Create or update validate.sh at the repo root that:
+            1. Installs and syncs all dependencies.
+            2. Compiles or builds the project.
+            3. Runs every test suite.
+            4. Runs linters and static-analysis tools.
+            5. Exits 0 only when every prior step passes.
           The script must be fully self-contained — CI runs it cold.
 
-          ── PHASE 4 · RUN ──────────────────────────────────────────────
-          Execute:  bash validate.sh
+          ### PHASE 4 — RUN
+          Execute: bash validate.sh
 
-          ── PHASE 5 · FIX LOOP ─────────────────────────────────────────
+          ### PHASE 5 — FIX LOOP
           If validate.sh exits non-zero:
-          • Read every error line carefully.
-          • Research the root cause via MCP tools if needed.
-          • Apply a precise surgical fix.
-          • Commit the fix with a descriptive message.
-          • Return to PHASE 4.
+          - Read every error line carefully.
+          - Research the root cause with MCP tools if needed.
+          - Apply a precise surgical fix.
+          - Commit with a descriptive message.
+          - Return to PHASE 4.
 
           Repeat until validate.sh exits 0.
           Do NOT summarise. Do NOT ask for permission. Do NOT stop early.
           Max validation-fix cycles: {max_iter}
           """).strip()
 
-          with open("AIDER_PROMPT.md", "w") as fh:
+          with open("KAWAII_PROMPT.md", "w") as fh:
               fh.write(prompt + "\n")
-
-          print(f"AIDER_PROMPT.md written: {len(prompt)} chars, "
-                f"{len(prompt.splitlines())} lines")
+          print(f"KAWAII_PROMPT.md: {len(prompt)} chars, {len(prompt.splitlines())} lines")
           PYSCRIPT_EOF
-
           python3 /tmp/gen_prompt.py
           rm /tmp/gen_prompt.py
 
-          # ── C) Stage and commit every file ─────────────────────────
-          git add README.md PROMPT.md .aider.mcp.json AIDER_PROMPT.md
+          # ── E) Pre-authorise Novita provider ───────────────────────
+          # Write auth.json directly so the API key is picked up even
+          # if the opencode.json options{} forwarding bug is present.
+          mkdir -p "${HOME}/.local/share/opencode"
+          cat > "${HOME}/.local/share/opencode/auth.json" << AUTHJSON_EOF
+          {
+            "novita": {
+              "type": "api",
+              "key": "${NOVITA_API_KEY}"
+            }
+          }
+          AUTHJSON_EOF
+          echo "auth.json written (key redacted):"
+          cat "${HOME}/.local/share/opencode/auth.json" \
+            | sed 's/"key": ".*"/"key": "[REDACTED]"/'
+
+          # ── F) Stage and commit ─────────────────────────────────────
+          git add README.md opencode.json AGENTS.md KAWAII_PROMPT.md
           git diff --cached --quiet \
-            || git commit -m "chore: KawaiiForge bootstrap files [skip ci]"
+            || git commit -m "chore: KawaiiForge bootstrap [skip ci]"
 
           echo ""
           echo "=== Bootstrap complete ==="
           git log --oneline -5
-          echo ""
           ls -lah
 
       # ─────────────────────────────────────────────
-      # 7. KAWAIIFORGE AUTONOMOUS BUILD LOOP
+      # 6. KAWAIIFORGE AUTONOMOUS BUILD LOOP
       #
-      #  FLAGS — every one verified against the usage
-      #  output printed by aider v0.86.2:
+      #    opencode run  = fully non-interactive mode
+      #    --file        = attach prompt file to session
+      #    -q            = quiet (no spinner in CI logs)
       #
-      #  --no-gitignore
-      #      Prevents aider from appending .aider* to
-      #      .gitignore, which would bury .aider.mcp.json
-      #      and break MCP loading.
-      #
-      #  --no-add-gitignore-files
-      #      Secondary guard: prevents aider from adding
-      #      ANY files to .gitignore during the run.
-      #
-      #  --no-detect-urls
-      #      CRITICAL: prevents aider from scraping any
-      #      URLs it finds in the prompt or in files.
-      #      This is what caused the entire context to be
-      #      burned on placeholder URLs last run.
-      #
-      #  --no-show-model-warnings
-      #      Suppresses "unknown context window" noise.
-      #
-      #  --map-tokens 2048
-      #      Aider's own warning says > 2048 confuses LLMs.
-      #
-      #  REMOVED --mcp-config
-      #      This flag does NOT exist in aider v0.86.2.
-      #      The usage output confirms it. Aider reads
-      #      .aider.mcp.json automatically by filename.
+      #    AGENTS.md is auto-loaded by opencode as the
+      #    system prompt — no extra flag needed.
+      #    opencode.json is auto-loaded from CWD.
       # ─────────────────────────────────────────────
       - name: KawaiiForge — Autonomous Build Loop
         env:
-          OPENAI_API_KEY:  ${{ secrets.NOVITA_API_KEY }}
-          OPENAI_API_BASE: "https://api.novita.ai/openai/v1"
+          NOVITA_API_KEY: ${{ secrets.NOVITA_API_KEY }}
         run: |
-          aider \
-            --model                   "openai/inclusionai/ling-2.6-1t" \
-            --openai-api-base         "${OPENAI_API_BASE}" \
-            --yes-always \
-            --auto-commits \
-            --no-auto-lint \
-            --no-check-update \
-            --no-gitignore \
-            --no-add-gitignore-files \
-            --no-detect-urls \
-            --no-show-model-warnings \
-            --map-tokens              2048 \
-            --message-file            AIDER_PROMPT.md \
-            PROMPT.md
+          opencode run \
+            --file KAWAII_PROMPT.md \
+            -q \
+            "Execute the full autonomous agent protocol in KAWAII_PROMPT.md.
+             Read AGENTS.md for your persona and rules.
+             Do not stop until validate.sh exits 0."
 
       # ─────────────────────────────────────────────
-      # 8. VERIFY AGENT PRODUCED COMMITS
-      #    Guard > 1 accounts for bootstrap commit.
+      # 7. VERIFY AGENT PRODUCED COMMITS
       # ─────────────────────────────────────────────
       - name: Verify agent produced commits
         run: |
@@ -376,7 +380,7 @@ jobs:
           fi
 
       # ─────────────────────────────────────────────
-      # 9. FINAL COLD VALIDATION RUN
+      # 8. FINAL COLD VALIDATION RUN
       # ─────────────────────────────────────────────
       - name: Final validation run
         run: |
@@ -390,7 +394,7 @@ jobs:
           echo "════════════ validate.sh exited 0 ✅ ════════════"
 
       # ─────────────────────────────────────────────
-      # 10. OPTIONAL SAST (C/C++ only)
+      # 9. OPTIONAL SAST (C/C++ only)
       # ─────────────────────────────────────────────
       - name: SAST — cppcheck (C/C++ projects only)
         if: always()
@@ -410,13 +414,13 @@ jobs:
               --error-exitcode=1 \
               --inline-suppr \
               $CPP_FILES \
-              || echo "::warning::cppcheck issues found — review before merge."
+              || echo "::warning::cppcheck issues found."
           else
             echo "No C/C++ files found — skipping cppcheck."
           fi
 
       # ─────────────────────────────────────────────
-      # 11. SHIP — PUSH BRANCH & OPEN PR
+      # 10. SHIP — PUSH BRANCH & OPEN PR
       # ─────────────────────────────────────────────
       - name: Push branch and open pull request
         if: success()
@@ -436,9 +440,10 @@ jobs:
           | Field | Value |
           |-------|-------|
           | **Status** | ✅ Fully autonomous completion |
-          | **Agent** | KawaiiForge (Playwright MCP + Fetch MCP grounded) |
+          | **Agent** | opencode-ai (non-interactive \`run\` mode) |
           | **Model** | \`inclusionai/ling-2.6-1t\` via Novita AI |
-          | **MCP Tools** | \`@playwright/mcp\` (headless Chromium) + \`mcp-server-fetch\` |
+          | **MCP** | \`@playwright/mcp\` (Chromium) + \`mcp-server-fetch\` |
+          | **Instructions** | \`AGENTS.md\` + \`KAWAII_PROMPT.md\` |
           | **Validation** | Autonomous fix loop until \`validate.sh\` exits 0 |
           | **Run** | [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
 
