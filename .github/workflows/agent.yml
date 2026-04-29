@@ -16,6 +16,17 @@ on:
       task:
         description: "Describe what you want built (any language, any domain)"
         required: true
+        default: >-
+          Build a production-grade Flask web application that converts files
+          bidirectionally between CSV, XLSX, XLS, and DBF formats.
+          Target users: elderly staff. Style: cute, clean, unique, creative kawaii
+          aesthetic (pastel pinks, blues, lavenders, sakura motifs, big friendly
+          buttons with cute animal/flower icons, extremely large fonts, high
+          contrast, simple 3-step wizard interface, drag-and-drop, clear large-text
+          instructions, joyful and non-intimidating UI). Must be extremely easy to use.
+          Production quality: proper security (sanitize uploads), error handling,
+          logging, tests, accessibility (ARIA, keyboard nav), responsive design.
+          Use best modern practices. ZERO stubs, ZERO TODOs, full implementation only.
       model:
         description: "Override model (optional)"
         required: false
@@ -156,9 +167,6 @@ jobs:
           key   = os.environ["NOVITA_API_KEY"]
           model = os.environ.get("OC_MODEL", "novita/inclusionai/ling-2.6-1t")
 
-          # FIX: The schema for MCP configuration has changed.
-          # Each MCP now requires "enabled: true" and "type: 'local'"
-          # with the command and args nested inside.
           cfg = {
             "$schema": "https://opencode.ai/config.json",
             "model": model,
@@ -226,61 +234,35 @@ jobs:
 
           ## Identity
           You are OmniForge, a world-class autonomous software engineering agent.
-          You are a polyglot expert across every mainstream language and framework:
-          Python, JavaScript, TypeScript, Go, Rust, Java, Kotlin, C, C++, C#,
-          Ruby, PHP, Elixir, Haskell, Swift, Dart, Shell, SQL, and more.
-          You pick the right tool for the job — not the trendy one.
-          You operate with ZERO human supervision, ZERO external prompts mid-run.
+          You are a polyglot expert across every mainstream language and framework.
+          You operate with ZERO human supervision.
 
           ## Non-negotiable rules
-          1. NEVER produce stubs, TODOs, placeholders, or "left as exercise" code.
-          2. NEVER ask for clarification — infer intent, make a decision, build it.
+          1. NEVER produce stubs, TODOs, or placeholders.
+          2. NEVER ask for clarification — infer intent and build.
           3. NEVER stop before validate.sh exits 0.
-          4. NEVER summarise instead of implementing.
-          5. ALWAYS verify every library API with MCP tools before writing code.
-          6. ALWAYS commit after each logical unit of work with a clear message.
-          7. Every file you produce must be complete, tested, and production-ready.
+          4. ALWAYS verify library APIs with MCP tools before writing code.
+          5. ALWAYS commit after each logical unit of work.
+          6. Every file you produce must be complete and production-ready.
 
           ## MCP tool protocol
-          ### Playwright MCP (browser_navigate, browser_snapshot, browser_click)
-          - Use for: reading official documentation, API surfaces, changelogs,
-            migration guides, exact function signatures, parameter names,
-            configuration schemas, and current stable release versions.
-          - Workflow: navigate → snapshot → extract exact details → code.
-
-          ### Fetch MCP
-          - Use for: raw package registry metadata (PyPI JSON API, npm registry,
-            crates.io API, pkg.go.dev, RubyGems API, etc.), README files,
-            specification documents.
-          - Always use real, fully-qualified package names — never placeholders.
-
-          ### Research discipline
-          - Research BEFORE coding. Do not trust memory for API details.
-          - If a library has changed its API, use the version-specific docs.
-          - Prefer the official docs over third-party blog posts.
+          - Use Playwright MCP for reading official documentation and API surfaces.
+          - Use Fetch MCP for raw package registry metadata.
+          - Research BEFORE coding. Do not trust memory.
 
           ## validate.sh contract
-          The script at the repo root MUST:
-          - Be 100% self-contained — CI runs it cold on a fresh Ubuntu machine.
-          - Install ALL dependencies for the chosen stack.
-          - Build or compile the project (if applicable to the stack).
-          - Run the complete test suite with a non-zero exit on any failure.
+          The script at the repo root MUST be 100% self-contained and:
+          - Install ALL dependencies.
+          - Build or compile the project.
+          - Run the complete test suite.
           - Run all applicable linters and static-analysis tools.
           - Exit 0 only when ALL prior steps pass.
-          - Never silently swallow errors.
 
           ## Output quality bar
-          - Security: validate all inputs, prevent injection, path traversal,
-            unsafe deserialization; set secure headers; limit upload sizes.
-          - Testing: unit tests + integration tests where applicable; aim for
-            meaningful coverage, not just line coverage theatre.
-          - Error handling: structured logging, graceful degradation, no bare
-            except/catch that swallows errors silently.
-          - Documentation: README.md with setup, usage, and architecture notes.
-          - If a UI: semantic HTML, ARIA labels, keyboard navigation, skip links,
-            high contrast, responsive — accessible by default.
-          - If a CLI: --help, proper exit codes, POSIX-compatible where possible.
-          - If a library: public API documented, versioned, idiomatic for language.
+          - Security: Validate all inputs, prevent injection, set secure headers.
+          - Testing: Meaningful unit and integration tests.
+          - Error handling: Structured logging, graceful degradation.
+          - Documentation: README.md with setup, usage, and architecture.
           EOF
           echo "✅ AGENTS.md written"
 
@@ -309,7 +291,10 @@ jobs:
           TASK: ${{ github.event.inputs.task }}
         run: |
           set -euo pipefail
-          opencode run "
+          # FIX: Add '--dir .' to force the agent to work in the current
+          # directory instead of a temporary sandbox. This ensures that
+          # its file creations and git commits persist after the run.
+          opencode run --dir . "
           ## YOUR MISSION
 
           ${TASK}
@@ -319,112 +304,44 @@ jobs:
           ### STEP 1 — RESEARCH
           Before writing a single line of code, use your MCP tools to verify
           every library, package, framework, and API you plan to use.
-
-          For each major dependency:
-          - Use the Playwright MCP to navigate its official documentation.
-          - Read the current stable version's API surface.
-          - Note exact class names, function signatures, config keys, and
-            any breaking changes in recent releases.
-          - Use the Fetch MCP to retrieve package registry metadata and
-            confirm the current stable version number.
-
-          Do this for ALL dependencies, not just the main one.
-          Do not proceed to STEP 2 until research is complete.
+          For each major dependency, navigate its official documentation, read
+          the current stable version's API surface, and note exact class names,
+          function signatures, and config keys.
 
           ### STEP 2 — IMPLEMENT
           Build the complete, production-grade solution. Standards:
-
-          COMPLETENESS
-          - Every file complete. Zero stubs. Zero TODOs. Zero placeholders.
-          - Every function implemented. Every edge case handled.
-          - Every error path returns a sensible response or exit code.
-
-          CORRECTNESS
-          - Use the exact APIs you verified in STEP 1.
-          - Use idiomatic patterns for the chosen language/framework.
-          - Handle all error paths explicitly — no silent failures.
-
-          SECURITY
-          - Validate and sanitise all user inputs.
-          - Prevent path traversal, injection, and unsafe deserialization.
-          - Set security headers (if HTTP). Limit upload sizes (if files).
-          - Never log secrets or sensitive data.
-
-          TESTING
-          - Write a comprehensive test suite: unit + integration.
-          - Tests must be runnable non-interactively in CI.
-          - Tests must be deterministic (no random seeds, no time-dependent
-            assertions without mocking).
-
-          LOGGING
-          - Structured logging throughout (not print/console.log scatter).
-          - Log levels used correctly: DEBUG, INFO, WARN, ERROR.
-
-          DOCUMENTATION
-          - README.md with: purpose, prerequisites, installation, usage,
-            architecture overview, and how to run tests.
-
-          UI TASKS (only if the task involves a user interface)
-          - Semantic HTML5, ARIA roles, keyboard navigable, skip links.
-          - Responsive layout (mobile-first).
-          - High contrast, minimum 16px body font, clear visual hierarchy.
-          - Design appropriate for the users described in the task.
-
-          CLI TASKS (only if the task involves a command-line tool)
-          - --help flag with full usage text.
-          - Correct POSIX exit codes (0=success, 1=general error, 2=misuse).
-          - Handle SIGINT/SIGTERM gracefully.
-
-          LIBRARY/API TASKS (only if the task involves a library or API)
-          - Full public API documentation (docstrings / JSDoc / godoc etc.).
-          - Versioned (e.g. a proper go.mod / package.json / pyproject.toml).
-          - Idiomatic for the language.
-
-          Commit logical units of work with descriptive commit messages
-          as you go. Do not batch everything into one giant commit at the end.
+          - COMPLETENESS: Every file complete. Zero stubs. Zero TODOs.
+          - CORRECTNESS: Use the exact APIs you verified in STEP 1.
+          - SECURITY: Validate and sanitise all user inputs.
+          - TESTING: Write a comprehensive test suite (unit + integration).
+          - LOGGING: Structured logging throughout.
+          - DOCUMENTATION: README.md with purpose, setup, and usage.
+          - Commit logical units of work with descriptive messages as you go.
 
           ### STEP 3 — WRITE validate.sh
-          Create validate.sh at the repo root.
-          Requirements (strict — CI runs this cold on a fresh Ubuntu 24 machine):
-          - #!/usr/bin/env bash at the top.
-          - set -euo pipefail immediately after the shebang.
-          - Install ALL dependencies for your chosen stack from scratch.
-          - Build / compile the project (if applicable).
-          - Run the complete test suite. A single test failure = non-zero exit.
-          - Run linters and static analysis tools.
-          - Print a clear success message and exit 0 only when all steps pass.
-          - Never use 'exit 0' to paper over failures.
+          Create validate.sh at the repo root. It must be self-contained and:
+          1. Install ALL dependencies from scratch.
+          2. Build / compile the project.
+          3. Run the complete test suite. A single failure must cause a non-zero exit.
+          4. Run linters and static analysis tools.
+          5. Exit 0 only when all steps pass.
 
-          ### STEP 4 — RUN validate.sh
-          Execute exactly: bash validate.sh
-
-          If it exits 0 → go to STEP 5.
-          If it exits non-zero → go to STEP 4-FIX.
-
-          ### STEP 4-FIX — Fix loop (repeat until exit 0)
-          - Read the COMPLETE error output — do not skim.
-          - Identify the root cause precisely.
-          - If the root cause is unclear, use MCP tools to research it.
-          - Apply a minimal, surgical fix to the affected code.
-          - Do NOT add workarounds that mask errors (e.g. '|| true').
-          - Do NOT modify the test to accept wrong output.
-          - Commit the fix with a message explaining what was broken.
-          - Run bash validate.sh again.
-          - Repeat until exit 0.
+          ### STEP 4 — RUN and FIX (The Autonomous Loop)
+          1. Execute exactly: bash validate.sh
+          2. If it exits non-zero, read the error, research if needed, apply a
+             surgical fix, commit the fix, and return to step 4.1.
+          3. Repeat this loop until validate.sh exits 0.
 
           ### STEP 5 — FINISH
-          - Commit any remaining uncommitted changes.
-          - Output a short summary (3-5 lines) of what was built and how
-            to use it.
+          - Commit any remaining changes.
+          - Output a short summary of what was built and how to use it.
 
           ## ABSOLUTE RULES
           - Do NOT ask questions. There is no human to answer.
-          - Do NOT stop early because something seems hard.
-          - Do NOT produce incomplete files and promise to continue later.
-          - Do NOT use 'pass', '# TODO', 'raise NotImplementedError',
-            placeholder functions, or any form of stub.
-          - You have full bash/shell access — install anything you need.
-          - Read AGENTS.md for your full identity, rules, and tool protocol.
+          - Do NOT stop early.
+          - Do NOT use placeholders or stubs.
+          - You have full bash/shell access.
+          - Read AGENTS.md for your full identity and rules.
           "
 
       # ──────────────────────────────────────────────────────────────
@@ -460,52 +377,30 @@ jobs:
           echo "════════════ validate.sh exited 0 ✅ ════════════"
 
       # ──────────────────────────────────────────────────────────────
-      # 12. SAST — cppcheck (C/C++ files if present)
+      # 12. SAST (cppcheck & shellcheck)
       # ──────────────────────────────────────────────────────────────
-      - name: SAST — cppcheck
+      - name: Run Static Analysis Tools (SAST)
         if: always()
         run: |
           set -euo pipefail
-          COUNT=$(find . -not -path './.git/*' \
-            \( -name '*.cpp' -o -name '*.cxx' -o -name '*.c' \
-               -o -name '*.h'  -o -name '*.hpp' \) \
-            2>/dev/null | wc -l || echo 0)
-          if [ "${COUNT}" -gt 0 ]; then
-            echo "cppcheck: scanning ${COUNT} file(s)..."
-            find . -not -path './.git/*' \
-              \( -name '*.cpp' -o -name '*.cxx' -o -name '*.c' \
-                 -o -name '*.h'  -o -name '*.hpp' \) \
-              -print0 | xargs -0 cppcheck \
-                --enable=warning,style,performance,portability \
-                --std=c++20 \
-                --suppress=missingIncludeSystem \
-                --error-exitcode=1 \
-                --inline-suppr \
-              || echo "::warning::cppcheck found issues (non-blocking)"
+          echo "--- Running SAST ---"
+          # cppcheck
+          if find . -not -path './.git/*' \( -name '*.c' -o -name '*.cpp' \) -print -quit | grep -q .; then
+            echo "Running cppcheck..."
+            find . -not -path './.git/*' \( -name '*.c' -o -name '*.cpp' \) -print0 | xargs -0 cppcheck --enable=all --inline-suppr --error-exitcode=1 || echo "::warning::cppcheck found issues."
           else
-            echo "No C/C++ files found — skipping cppcheck."
+            echo "No C/C++ files, skipping cppcheck."
+          fi
+          # shellcheck
+          if find . -not -path './.git/*' -name '*.sh' -print -quit | grep -q .; then
+            echo "Running shellcheck..."
+            find . -not -path './.git/*' -name '*.sh' -print0 | xargs -0 shellcheck --severity=warning || echo "::warning::shellcheck found issues."
+          else
+            echo "No shell scripts, skipping shellcheck."
           fi
 
       # ──────────────────────────────────────────────────────────────
-      # 13. SAST — shellcheck (shell scripts if present)
-      # ──────────────────────────────────────────────────────────────
-      - name: SAST — shellcheck
-        if: always()
-        run: |
-          set -euo pipefail
-          COUNT=$(find . -not -path './.git/*' -name '*.sh' \
-                  2>/dev/null | wc -l || echo 0)
-          if [ "${COUNT}" -gt 0 ]; then
-            echo "shellcheck: scanning ${COUNT} script(s)..."
-            find . -not -path './.git/*' -name '*.sh' \
-              -print0 | xargs -0 shellcheck --severity=warning \
-              || echo "::warning::shellcheck found issues (non-blocking)"
-          else
-            echo "No shell scripts found — skipping shellcheck."
-          fi
-
-      # ──────────────────────────────────────────────────────────────
-      # 14. PUSH BRANCH + OPEN PR
+      # 13. PUSH BRANCH + OPEN PR
       # ──────────────────────────────────────────────────────────────
       - name: Push branch and open pull request
         if: success()
@@ -542,8 +437,6 @@ jobs:
           | **Status** | ✅ Autonomous completion |
           | **Agent** | `opencode-ai` — headless `run` mode |
           | **Model** | `inclusionai/ling-2.6-1t` via Novita AI |
-          | **MCP** | Playwright (Chromium) + mcp-server-fetch |
-          | **Research** | Live doc verification before every dependency |
           | **Commits** | {ahead} beyond bootstrap |
           | **Validation** | `validate.sh` exits 0 ✅ |
           | **Run** | [{run_id}]({server}/{repo}/actions/runs/{run_id}) |
