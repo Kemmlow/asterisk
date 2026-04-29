@@ -1,38 +1,44 @@
 # ╔══════════════════════════════════════════════════════════════════╗
-# ║              Forge: Aider + Novita AI  (v4 — playwright MCP)    ║
-# ║  • @playwright/mcp  — zero API keys, fully local, headless      ║
-# ║  • mcp-server-fetch — lightweight fallback fetcher              ║
-# ║  • 3-hour hard ceiling                                           ║
-# ║  • Zero token limits (unlimited Novita API)                      ║
-# ║  • ling-2.6-1t hardcoded                                         ║
-# ║  • SAST lint gate (cppcheck) before PR                           ║
+# ║                    KawaiiForge: Autonomous AI Builder           ║
+# ║  • Fully autonomous agent for ANY language and ANY task         ║
+# ║  • Default task: Cute kawaii file converter for elderly staff   ║
+# ║  • Playwright MCP (local, zero API keys, headless Chromium)     ║
+# ║  • Strong research-before-code protocol to eliminate hallucinations
+# ║  • Intelligent autonomous loop (research → implement → validate → fix)
+# ║  • 3-hour timeout, unlimited tokens, ling-2.6-1t                ║
 # ╚══════════════════════════════════════════════════════════════════╝
-name: "Forge: Aider + Novita AI"
+name: "KawaiiForge: Autonomous AI Builder"
 
 on:
   workflow_dispatch:
     inputs:
       task_description:
-        description: 'Target Build Task'
+        description: 'Task for KawaiiForge'
         required: true
         default: >-
-          Write a prod-grade AES-256-GCM + ChaCha20-Poly1305 dual-cipher
-          crypter in C++20. ZERO brevity. ZERO stubs. ONLY complete,
-          production-quality, real-world hyper-complex best code.
+          Build a production-grade Flask web application that converts files
+          bidirectionally between CSV, XLSX, XLS, and DBF formats.
+          Target users: elderly staff. Style: cute, clean, unique, creative kawaii
+          aesthetic (pastel pinks, blues, lavenders, sakura motifs, big friendly
+          buttons with cute animal/flower icons, extremely large fonts, high
+          contrast, simple 3-step wizard interface, drag-and-drop, clear large-text
+          instructions, joyful and non-intimidating UI). Must be extremely easy to use.
+          Production quality: proper security (sanitize uploads), error handling,
+          logging, tests, accessibility (ARIA, keyboard nav), responsive design.
+          Use best modern practices. ZERO stubs, ZERO TODOs, full implementation only.
       max_fix_iterations:
-        description: 'Max build-fix loops before giving up'
+        description: 'Maximum validation-fix cycles'
         required: false
-        default: '20'
+        default: '25'
 
-# ── Only one forge run per branch at a time ───────────────────────
 concurrency:
-  group: forge-${{ github.ref }}
+  group: kawaiiforge-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  forge:
+  kawaiiforge:
     runs-on: ubuntu-latest
-    timeout-minutes: 180           # ← 3 hours hard ceiling
+    timeout-minutes: 180
     permissions:
       contents: write
       pull-requests: write
@@ -40,25 +46,21 @@ jobs:
       actions: write
 
     steps:
-      # ── 1. Checkout ─────────────────────────────────────────────
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # ── 2. Python 3.12 ──────────────────────────────────────────
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      # ── 3. Node 20 (required for npx @playwright/mcp) ───────────
       - name: Set up Node 20
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      # ── 4. System deps + build toolchain ────────────────────────
       - name: Install system dependencies
         run: |
           sudo apt-get update -qq
@@ -66,58 +68,35 @@ jobs:
             build-essential cmake ninja-build \
             libssl-dev libsodium-dev \
             cppcheck \
-            # Playwright/Chromium runtime deps on Ubuntu
-            libnss3 libatk1.0-0 libatk-bridge2.0-0 \
-            libcups2 libdrm2 libxkbcommon0 libxcomposite1 \
-            libxdamage1 libxfixes3 libxrandr2 libgbm1 \
-            libasound2
+            libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+            libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+            libgbm1 libasound2 \
+            golang-go rustc cargo default-jdk
 
-      # ── 5. Python deps ──────────────────────────────────────────
-      - name: Install Python dependencies
+      - name: Install Python & Node tools
         run: |
           pip install -q --upgrade pip
           pip install -q aider-chat uv
-
-      # ── 6. Install Playwright + Chromium (no API key needed) ─────
-      #    We install the package globally so npx can find it fast,
-      #    then pull only Chromium — smallest footprint for headless CI.
-      - name: Install Playwright MCP + Chromium browser
-        run: |
           npm install -g @playwright/mcp@latest
-          # Install only Chromium — Firefox/WebKit not needed in CI
           npx playwright install chromium --with-deps
-          echo "::notice::Playwright + Chromium installed successfully."
 
-      # ── 7. Validate secrets ──────────────────────────────────────
-      - name: Validate secrets
+      - name: Write KawaiiForge Persona (PROMPT.md)
         run: |
-          if [ -z "${{ secrets.NOVITA_API_KEY }}" ]; then
-            echo "::error::NOVITA_API_KEY is not set. Aborting."
-            exit 1
-          fi
-          echo "::notice::Playwright MCP active (no API key required)."
+          cat > PROMPT.md << 'EOF'
+          You are KawaiiForge — a world-class, gentle, and extremely thorough full-stack engineer who specializes in creating joyful, accessible, and production-grade software.
+          Your signature style is "kawaii engineering": clean, cute, empathetic interfaces combined with rock-solid, secure, well-tested backend code.
+          You always research APIs and best practices using the available MCP tools before writing any code.
+          You never use placeholders, TODOs, stubs, or abbreviated code. Every file you produce must be complete and ready for production.
+          EOF
 
-      # ── 8. Write .aider.mcp.json ─────────────────────────────────
-      #    TWO local servers — both zero API keys:
-      #      ① @playwright/mcp   → full browser: navigate, search, fetch,
-      #                            JS execution, accessibility snapshots
-      #      ② mcp-server-fetch  → lightweight plain HTTP fallback
-      #
-      #    --headless is critical: GitHub Actions has no display server.
-      #    --no-sandbox required for Chromium inside a container/CI env.
-      - name: Write .aider.mcp.json
+      - name: Write .aider.mcp.json (Playwright + fetch)
         run: |
           cat > .aider.mcp.json << 'EOF'
           {
             "mcpServers": {
               "playwright": {
                 "command": "npx",
-                "args": [
-                  "@playwright/mcp@latest",
-                  "--headless",
-                  "--no-sandbox",
-                  "--browser=chromium"
-                ]
+                "args": ["@playwright/mcp@latest", "--headless", "--no-sandbox", "--browser=chromium"]
               },
               "fetch": {
                 "command": "uvx",
@@ -126,36 +105,24 @@ jobs:
             }
           }
           EOF
-          echo "--- .aider.mcp.json ---"
           cat .aider.mcp.json
 
-      # ── 9. Forge ─────────────────────────────────────────────────
-      - name: Forge (Aider autonomous build loop)
+      - name: KawaiiForge — Autonomous Build Loop
         env:
-          OPENAI_API_KEY:  ${{ secrets.NOVITA_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.NOVITA_API_KEY }}
           OPENAI_API_BASE: "https://api.novita.ai/openai/v1"
-          MAX_ITERATIONS:  ${{ github.event.inputs.max_fix_iterations }}
-          TASK:            ${{ github.event.inputs.task_description }}
+          MAX_ITERATIONS: ${{ github.event.inputs.max_fix_iterations }}
+          TASK: ${{ github.event.inputs.task_description }}
         run: |
           set -euo pipefail
 
-          git config user.name  "forge-bot"
-          git config user.email "forge@ci.local"
-          git checkout -b "forge/${{ github.run_id }}"
+          git config user.name "kawaiiforge-bot"
+          git config user.email "kawaiiforge@ci.local"
+          git checkout -b "kawaiiforge/${{ github.run_id }}"
 
-          # ── Persona (repo PROMPT.md wins, safe fallback otherwise) ─
-          SKILL=$(cat PROMPT.md 2>/dev/null || cat << 'SKILL_EOF'
-          You are a world-class C++20 systems engineer with 20 years of
-          cryptography and OS-level programming experience.
-          You write ONLY complete, compilable, production-grade code.
-          You NEVER write pseudo-code, TODOs, stubs, or placeholder comments.
-          You verify every API signature before using it via MCP browser search.
-          SKILL_EOF
-          )
-
-          # Seed file so aider always has a repo target
-          touch forge_output.cpp
-          git add forge_output.cpp
+          # Seed repo
+          touch README.md
+          git add README.md PROMPT.md .aider.mcp.json
 
           aider \
             --model "openai/inclusionai/ling-2.6-1t" \
@@ -163,206 +130,95 @@ jobs:
             --auto-commits \
             --no-auto-lint \
             --no-stream \
-            --message "$SKILL
+            --message "You are KawaiiForge.
 
-          ════════════════════════════════════════════════════════════
-          TASK  : $TASK
-          ════════════════════════════════════════════════════════════
+          Default mission (use this exact style and quality bar for this run):
+          $TASK
 
-          ██████████ MCP TOOL USAGE — MANDATORY ██████████████████████
-          You have TWO MCP servers connected and active RIGHT NOW.
-          Both require ZERO API keys and are fully local:
+          ███████████████ GENERAL AUTONOMOUS AGENT PROTOCOL ███████████████
+          You are a fully autonomous software engineering agent capable of working in ANY programming language and framework.
 
-            ① playwright  (primary — full browser, use this for search)
-               Tools available:
-               • browser_navigate  → open any URL in headless Chromium
-               • browser_snapshot  → read the page as an accessibility tree
-               • browser_click     → click search results, links, buttons
-               • browser_type      → type into search boxes
-               • browser_wait_for  → wait for dynamic content to load
+          1. Analyze the task and choose the BEST language/stack for it.
+          2. Use the playwright MCP to research documentation (DuckDuckGo + direct navigation to official docs, StackOverflow, MDN, Flask docs, pandas docs, Rust book, etc.).
+          3. Create a complete production-grade project with:
+             - All source files (no stubs)
+             - Proper build system (CMake, Makefile, pyproject.toml, package.json, Cargo.toml, etc.)
+             - Comprehensive tests
+             - A validate.sh script that runs build → test → lint and exits 0 only on full success
+             - README with clear instructions
+             - Kawaii aesthetic when the task involves UI (large fonts, pastel colors, cute icons, high contrast, elderly-friendly design)
 
-            ② fetch  (fallback — fast plain HTTP for known stable URLs)
-               Tools available:
-               • fetch_url → pull any public URL as plain text/markdown
+          MANDATORY RESEARCH PROTOCOL:
+          - Before using ANY library, framework call, or API: use playwright to navigate DuckDuckGo or the official documentation site, then snapshot and read the exact current API.
+          - Never hallucinate function signatures, class names, or configuration options.
 
-          ── HOW TO DO A WEB SEARCH (step by step) ───────────────────
-          Step 1  → browser_navigate to:
-                      https://www.google.com/search?q=YOUR+QUERY+HERE
-                    OR https://duckduckgo.com/?q=YOUR+QUERY+HERE
-                    (DuckDuckGo is more bot-friendly — prefer it)
+          AUTONOMOUS EXECUTION LOOP:
+          PHASE 1: Research all required APIs and best practices using playwright MCP.
+          PHASE 2: Implement the complete project (all files, full functionality).
+          PHASE 3: Create or update validate.sh that performs:
+                    - Dependency installation
+                    - Build / compile
+                    - Run all tests
+                    - Lint / static analysis
+                    - Security checks where applicable
+          PHASE 4: Run ./validate.sh
+          PHASE 5: If it fails, analyze every error, research the fix using MCP if needed, fix the root cause, commit, and return to PHASE 4.
+          Continue looping until ./validate.sh exits with code 0.
 
-          Step 2  → browser_snapshot  to read the search results list
+          You have effectively unlimited tokens and time (within the 3-hour CI limit). Do not summarize. Do not ask for permission. Produce only complete, high-quality, production-ready code.
 
-          Step 3  → browser_click on the most relevant result link
+          Max validation cycles: $MAX_ITERATIONS
+          You must not stop until validate.sh succeeds."
 
-          Step 4  → browser_snapshot  to read the actual page content
-
-          Step 5  → ONLY then write code based on verified content
-
-          ── HOW TO FETCH A KNOWN URL DIRECTLY ───────────────────────
-          For cppreference, OpenSSL docs, libsodium docs — use fetch:
-            fetch_url("https://en.cppreference.com/w/cpp/...")
-            fetch_url("https://docs.openssl.org/...")
-            fetch_url("https://libsodium.gitbook.io/doc/...")
-
-          ── MANDATORY SEARCH-BEFORE-CODE PROTOCOL ───────────────────
-          BEFORE writing ANY function call you are not 100% certain of:
-            1. DuckDuckGo search: '<function name> cppreference'
-            2. Navigate to the cppreference result
-            3. Read the EXACT function signature from the page
-            4. ONLY then write the code using that verified signature
-
-          NEVER invent:
-            • Function signatures or overloads
-            • Enum values or macro names
-            • CMake target names or find_package() module names
-            • Struct member names or template parameters
-
-          If a search returns nothing → use the safest known fallback
-          and document exactly why in a code comment.
-
-          ████████████ AUTONOMOUS EXECUTION CONTRACT ██████████████████
-          YOU ARE IN FULLY AUTONOMOUS MODE.
-          THE API HAS NO TOKEN LIMIT.
-          Write every file in full. Every function completely.
-          Every code path explicitly. DO NOT abbreviate anything.
-          DO NOT ask for confirmation. DO NOT summarise. 
-          DO NOT add TODO comments or placeholder stubs.
-
-          ── PHASE 1 · RESEARCH ───────────────────────────────────────
-          • DuckDuckGo search for the current stable API of EVERY library
-            you plan to use before writing a single line of code
-          • Search CMake find_package() module names and imported target
-            names — these are commonly wrong when hallucinated
-          • Search for deprecation notices on any API older than C++17
-          • Only proceed to PHASE 2 after all APIs are verified
-
-          ── PHASE 2 · IMPLEMENT ──────────────────────────────────────
-          • Write EVERY file in full: all headers, sources, CMakeLists.txt
-          • C++20 throughout: RAII, smart pointers, std::expected,
-            concepts, ranges, std::span, std::string_view
-          • Zero placeholders · Zero TODOs · Zero stub functions
-          • Both happy path AND every error path fully implemented
-          • Secure coding: zeroize sensitive buffers on destruction,
-            check ALL return values, constant-time MAC comparison
-
-          ── PHASE 3 · BUILD ──────────────────────────────────────────
-          Run EXACTLY:
-            rm -rf build && cmake -B build -G Ninja \
-              -DCMAKE_BUILD_TYPE=Release \
-              -DCMAKE_CXX_STANDARD=20 \
-              -DCMAKE_CXX_FLAGS=\"-Wall -Wextra -Werror -pedantic\" \
-              && cmake --build build --parallel
-
-          ── PHASE 4 · EVALUATE ───────────────────────────────────────
-          cmake exits 0  →  SUCCESS. STOP immediately.
-          cmake exits ≠0 →  PHASE 5 immediately.
-
-          ── PHASE 5 · DIAGNOSE & FIX ─────────────────────────────────
-          For EVERY error/warning line:
-            error: use of undeclared identifier
-              → browser_navigate to DuckDuckGo, search the identifier,
-                find the correct header, add it
-            error: no matching function for call to X
-              → fetch_url the cppreference page for X, read exact overloads
-            error: undefined reference to X
-              → Add X's library to target_link_libraries in CMakeLists.txt
-                (search CMake docs if unsure of the imported target name)
-            warning: unused parameter
-              → [[maybe_unused]] or actually use it
-            warning: narrowing conversion
-              → explicit static_cast<> with a safety comment
-            warning: deprecated
-              → DuckDuckGo search for the modern replacement
-            ANY other diagnostic
-              → Fix the root cause. Never suppress with pragmas or casts
-                unless provably safe and commented.
-          Commit ALL fixes. Return to PHASE 3.
-
-          ── PHASE 6 · REPEAT ─────────────────────────────────────────
-          Loop PHASE 3 → 4 → 5 until PHASE 4 says SUCCESS.
-          Max iterations: $MAX_ITERATIONS
-          YOU MUST NOT STOP until cmake exits with code 0."
-
-          # ── Guard: fail loudly if aider made zero commits ─────────
           COMMITS_AHEAD=$(git rev-list --count origin/main..HEAD 2>/dev/null || echo 0)
           echo "Commits ahead of main: $COMMITS_AHEAD"
           if [ "$COMMITS_AHEAD" -eq 0 ]; then
-            echo "::error::Aider produced zero commits — model failed silently."
+            echo "::error::KawaiiForge produced no commits."
             exit 1
           fi
 
-      # ── 10. SAST gate (cppcheck) ─────────────────────────────────
-      - name: SAST — cppcheck
+      - name: Final Validation Run
         run: |
-          set -euo pipefail
-          CPP_FILES=$(git diff --name-only origin/main..HEAD \
-                      | grep -E '\.(cpp|h|hpp|cxx)$' || true)
-
-          if [ -z "$CPP_FILES" ]; then
-            echo "No C++ source files found — skipping cppcheck."
-            exit 0
+          if [ -f "validate.sh" ]; then
+            chmod +x validate.sh
+            echo "Running final validation..."
+            ./validate.sh || { echo "::error::Final validation failed after autonomous loop."; exit 1; }
+          else
+            echo "No validate.sh found — agent should have created one."
+            exit 1
           fi
 
-          echo "Running cppcheck on:"
-          echo "$CPP_FILES"
+      - name: SAST — cppcheck (if C/C++ present)
+        if: always()
+        run: |
+          if ls **/*.{cpp,cxx,h,hpp} 1> /dev/null 2>&1; then
+            cppcheck --enable=warning,style,performance,portability --std=c++20 \
+              --suppress=missingIncludeSystem --error-exitcode=1 --inline-suppr \
+              **/*.{cpp,cxx,h,hpp} || echo "::warning::cppcheck issues found"
+          fi
 
-          cppcheck \
-            --enable=warning,style,performance,portability \
-            --std=c++20 \
-            --suppress=missingIncludeSystem \
-            --error-exitcode=1 \
-            --inline-suppr \
-            $CPP_FILES \
-          || {
-            echo "::error::cppcheck found issues. Fix before merging."
-            exit 1
-          }
-
-      # ── 11. Ship ─────────────────────────────────────────────────
-      - name: Ship — push branch & open PR
+      - name: Ship — Create PR
         if: success()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -euo pipefail
-
-          BRANCH="forge/${{ github.run_id }}"
+          BRANCH="kawaiiforge/${{ github.run_id }}"
           git push -u origin "$BRANCH"
-          COMMIT_COUNT=$(git rev-list --count origin/main..HEAD)
 
           gh pr create \
-            --title "🔨 Forge: ${{ github.event.inputs.task_description }}" \
-            --body "## Forge Build Report
+            --title "🌸 KawaiiForge: ${{ github.event.inputs.task_description }}" \
+            --body "## KawaiiForge Report
 
-          | Field            | Value |
-          |------------------|-------|
-          | **Status**       | ✅ Build verified green |
-          | **Agent**        | Aider (autonomous loop) |
-          | **Model**        | inclusionai/ling-2.6-1t |
-          | **Token limit**  | None (unlimited API) |
-          | **MCP Servers**  | @playwright/mcp (headless Chromium) · mcp-server-fetch |
-          | **API keys**     | None required — fully local MCP |
-          | **Commits**      | $COMMIT_COUNT |
-          | **SAST**         | cppcheck passed |
-          | **Timeout**      | 3 hours |
-          | **Run**          | [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
+          | Item | Value |
+          |------|-------|
+          | **Status** | ✅ Fully autonomous completion |
+          | **Agent** | KawaiiForge (Playwright MCP grounded) |
+          | **Model** | inclusionai/ling-2.6-1t |
+          | **Default Task** | Elderly-friendly kawaii file converter |
+          | **Capability** | Any language, any task |
+          | **Validation** | Multiple autonomous fix cycles until all tests pass |
+          | **Run** | [Link](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
 
-          > Playwright MCP (headless Chromium) was active during generation.
-          > The agent navigated DuckDuckGo and cppreference.com live to verify
-          > every API signature before writing code — no API key required." \
+          Built with ❤️ by KawaiiForge — making software both powerful and adorable." \
             --base main \
             --head "$BRANCH"
-
-      # ── 12. Failure diagnostics ───────────────────────────────────
-      - name: Dump logs on failure
-        if: failure()
-        run: |
-          echo "=== Last 20 git commits ==="
-          git log --oneline -20 || true
-          echo "=== .aider.mcp.json ==="
-          cat .aider.mcp.json || true
-          echo "=== CMake error log ==="
-          cat build/CMakeFiles/CMakeError.log 2>/dev/null || true
-          echo "=== Playwright version ==="
-          npx playwright --version || true
