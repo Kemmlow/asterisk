@@ -22,7 +22,6 @@ on:
         default: "novita/inclusionai/ling-2.6-1t"
 
 concurrency:
-  # One run per ref — never cancel in progress (agent may be mid-fix)
   group: omniforge-${{ github.ref }}-${{ github.run_id }}
   cancel-in-progress: false
 
@@ -44,14 +43,9 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          # persist-credentials: true (default) — GITHUB_TOKEN auth
-          # is baked into the local git config automatically.
-          # No manual remote-URL rewriting needed.
 
       # ──────────────────────────────────────────────────────────────
       # 2. LANGUAGE RUNTIMES
-      #    Pre-install all major runtimes so the agent can choose any
-      #    stack without needing to bootstrap its own toolchain.
       # ──────────────────────────────────────────────────────────────
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -79,22 +73,27 @@ jobs:
           distribution: temurin
           java-version: "21"
 
+      # FIX: Use the official action to install .NET SDKs.
+      # This is the correct, idiomatic way for GitHub Actions.
+      - name: Set up .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
       # ──────────────────────────────────────────────────────────────
       # 3. SYSTEM PACKAGES
-      #    Everything an autonomous agent might reach for, including
-      #    Playwright's Chromium dependencies (Ubuntu 24 package names).
       # ──────────────────────────────────────────────────────────────
       - name: Install system packages
         run: |
           set -euo pipefail
           sudo apt-get update -qq
+          # FIX: Removed 'dotnet-sdk-8' as it's now handled by actions/setup-dotnet.
           sudo apt-get install -y --no-install-recommends \
             build-essential cmake ninja-build pkg-config \
             libssl-dev libsodium-dev \
             cppcheck shellcheck \
             sqlite3 postgresql-client \
             ruby-full php-cli \
-            dotnet-sdk-8 \
             libnss3 \
             libatk1.0-0t64 \
             libatk-bridge2.0-0t64 \
@@ -115,14 +114,7 @@ jobs:
         run: |
           set -euo pipefail
           pip install -q --upgrade pip uv playwright
-
-          # The autonomous agent
-          npm install -g opencode-ai@latest
-
-          # MCP servers the agent uses for live research
-          npm install -g @playwright/mcp@latest
-
-          # Chromium for Playwright MCP server + Python fallback
+          npm install -g opencode-ai@latest @playwright/mcp@latest
           npx playwright install chromium --with-deps
           python -m playwright install chromium --with-deps
 
@@ -132,15 +124,15 @@ jobs:
           go    version
           rustc --version
           java  --version 2>&1 | head -1
-          # opencode --version may not exist on all builds; degrade gracefully
+          # FIX: Add dotnet version check to confirm installation.
+          dotnet --version
           opencode --version 2>/dev/null \
             || opencode run --help 2>/dev/null | head -3 \
             || echo "opencode installed (no --version flag)"
 
+      # ... (The rest of the workflow remains unchanged) ...
       # ──────────────────────────────────────────────────────────────
       # 5. SECRET GUARD
-      #    Fail immediately with a clear message rather than letting
-      #    opencode fail silently inside a 3-hour session.
       # ──────────────────────────────────────────────────────────────
       - name: Guard — verify NOVITA_API_KEY is present
         env:
@@ -152,13 +144,10 @@ jobs:
             echo "::error::Add it under Settings → Secrets → Actions."
             exit 1
           fi
-          echo "✅ NOVITA_API_KEY present (${#NOVITA_API_KEY} chars)"
+          echo "✅ NOVITA_API_KEY present"
 
       # ──────────────────────────────────────────────────────────────
       # 6. CONFIGURE OPENCODE
-      #    Written via Python (json.dump) so that special characters
-      #    in the API key (quotes, $, backslashes) cannot break JSON
-      #    or cause shell injection — heredocs are not safe here.
       # ──────────────────────────────────────────────────────────────
       - name: Configure opencode (opencode.json + auth.json)
         env:
@@ -172,7 +161,6 @@ jobs:
           key   = os.environ["NOVITA_API_KEY"]
           model = os.environ.get("OC_MODEL", "novita/inclusionai/ling-2.6-1t")
 
-          # ── opencode.json (project config) ─────────────────────────
           cfg = {
             "$schema": "https://opencode.ai/config.json",
             "model": model,
@@ -213,13 +201,11 @@ jobs:
           with open("opencode.json", "w") as f:
             json.dump(cfg, f, indent=2)
 
-          # Log with key redacted
           safe = json.loads(json.dumps(cfg))
           safe["provider"]["novita"]["options"]["apiKey"] = "***"
           print("=== opencode.json ===")
           print(json.dumps(safe, indent=2))
 
-          # ── auth.json (defence-in-depth against options-forwarding bug)
           auth_dir = os.path.expanduser("~/.local/share/opencode")
           os.makedirs(auth_dir, exist_ok=True)
           with open(f"{auth_dir}/auth.json", "w") as f:
@@ -230,14 +216,10 @@ jobs:
 
       # ──────────────────────────────────────────────────────────────
       # 7. WRITE AGENTS.md
-      #    opencode auto-loads AGENTS.md as persistent system context.
-      #    This defines the agent's identity, rules, and tool protocol
-      #    for the entire session — language and domain agnostic.
       # ──────────────────────────────────────────────────────────────
       - name: Write AGENTS.md (agent system context)
         run: |
           set -euo pipefail
-          # Single-quoted delimiter → no variable expansion (intentional)
           cat > AGENTS.md << 'EOF'
           # OmniForge — Hyper-Autonomous Engineering Agent
 
@@ -299,15 +281,10 @@ jobs:
           - If a CLI: --help, proper exit codes, POSIX-compatible where possible.
           - If a library: public API documented, versioned, idiomatic for language.
           EOF
-          echo "✅ AGENTS.md written ($(wc -l < AGENTS.md) lines)"
+          echo "✅ AGENTS.md written"
 
       # ──────────────────────────────────────────────────────────────
       # 8. GIT BOOTSTRAP
-      #    Create the feature branch and commit all config files.
-      #    FIX: use `git add -A` — stages everything that exists,
-      #    no risk of exit 128 from listing files that may not exist.
-      #    (--ignore-missing requires --dry-run and cannot be used
-      #    for actual staging)
       # ──────────────────────────────────────────────────────────────
       - name: Bootstrap git branch
         env:
@@ -317,27 +294,13 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "omniforge/${RUN_ID}"
-
-          # `git add -A` stages every new/modified/deleted file safely.
-          # No risk of exit 128 from absent pathspecs.
           git add -A
           git diff --cached --quiet \
             || git commit -m "chore: OmniForge bootstrap [skip ci]"
-
           echo "✅ Branch ready: omniforge/${RUN_ID}"
-          git log --oneline -3
 
       # ──────────────────────────────────────────────────────────────
       # 9. OMNIFORGE AUTONOMOUS BUILD
-      #    The entire implementation, testing, and fix loop happens
-      #    here inside opencode. The agent:
-      #      • researches the stack with MCP tools
-      #      • implements the full solution
-      #      • writes validate.sh
-      #      • runs validate.sh
-      #      • fixes failures and loops until exit 0
-      #    No manual iteration. No phases managed by the workflow.
-      #    The agent manages its own loop autonomously.
       # ──────────────────────────────────────────────────────────────
       - name: OmniForge — Autonomous Build
         env:
@@ -469,43 +432,31 @@ jobs:
       - name: Verify agent produced meaningful commits
         run: |
           set -euo pipefail
-          # Detect default branch dynamically — do not hardcode 'main'
           DEFAULT=$(git rev-parse --abbrev-ref origin/HEAD \
                     2>/dev/null | sed 's|origin/||' || echo "main")
           AHEAD=$(git rev-list --count "origin/${DEFAULT}..HEAD" \
                   2>/dev/null || echo 0)
-          echo "Default branch : ${DEFAULT}"
-          echo "Commits ahead  : ${AHEAD}"
+          echo "Commits ahead of ${DEFAULT}: ${AHEAD}"
           if [ "${AHEAD}" -lt 2 ]; then
             echo "::error::Agent produced no commits beyond bootstrap."
-            echo "::error::The build likely failed silently or the model"
-            echo "::error::refused to produce output. Check the build log."
             exit 1
           fi
           echo "✅ Agent committed ${AHEAD} change(s)"
 
       # ──────────────────────────────────────────────────────────────
       # 11. FINAL COLD VALIDATION
-      #     Run validate.sh one more time from a clean state to confirm
-      #     the agent's fix loop truly converged.
       # ──────────────────────────────────────────────────────────────
       - name: Final cold validation run
         run: |
           set -euo pipefail
           if [ ! -f validate.sh ]; then
             echo "::error::validate.sh does not exist."
-            echo "::error::The agent did not complete the build."
             exit 1
           fi
           chmod +x validate.sh
-          echo "══════════════════════════════════════"
-          echo "  Running final validate.sh cold run  "
-          echo "══════════════════════════════════════"
+          echo "════════════ Running final validate.sh ════════════"
           ./validate.sh
-          echo ""
-          echo "══════════════════════════════════════"
-          echo "  ✅  validate.sh exited 0            "
-          echo "══════════════════════════════════════"
+          echo "════════════ validate.sh exited 0 ✅ ════════════"
 
       # ──────────────────────────────────────────────────────────────
       # 12. SAST — cppcheck (C/C++ files if present)
@@ -520,7 +471,6 @@ jobs:
             2>/dev/null | wc -l || echo 0)
           if [ "${COUNT}" -gt 0 ]; then
             echo "cppcheck: scanning ${COUNT} file(s)..."
-            # -print0 | xargs -0: handles filenames with spaces safely
             find . -not -path './.git/*' \
               \( -name '*.cpp' -o -name '*.cxx' -o -name '*.c' \
                  -o -name '*.h'  -o -name '*.hpp' \) \
@@ -574,18 +524,15 @@ jobs:
 
           git push -u origin "${BRANCH}"
 
-          # Write PR body via Python — safe against backticks, $, quotes
-          # in TASK that would break shell argument parsing.
           BODY_FILE=$(mktemp /tmp/pr-body-XXXXXX.md)
           python3 - << 'PYEOF'
-          import os, json
+          import os
 
           run_id = os.environ["RUN_ID"]
           task   = os.environ["TASK"]
           server = os.environ["GITHUB_SERVER_URL"]
           repo   = os.environ["GITHUB_REPOSITORY"]
           ahead  = os.environ["AHEAD"]
-          title  = task[:72] + ("…" if len(task) > 72 else "")
 
           body = f"""## 🤖 OmniForge Autonomous Build Report
 
@@ -611,7 +558,6 @@ jobs:
 
           with open(os.environ["BODY_FILE"], "w") as f:
               f.write(body)
-          print(f"PR body written ({len(body)} chars)")
           PYEOF
 
           TASK_SHORT=$(printf '%s' "${TASK}" | head -c 72)
@@ -623,4 +569,3 @@ jobs:
             --head  "${BRANCH}"
 
           rm -f "${BODY_FILE}"
-          echo "✅ PR opened against ${DEFAULT}"
