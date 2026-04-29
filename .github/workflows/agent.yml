@@ -3,17 +3,18 @@
 # ║  • Fully autonomous agent for ANY language and ANY task         ║
 # ║  • Default task: Cute kawaii file converter for elderly staff   ║
 # ║  • Playwright MCP (local, zero API keys, headless Chromium)     ║
-# ║  • Strong research-before-code protocol to eliminate hallucinations
-# ║  • Intelligent autonomous loop (research → implement → validate → fix)
+# ║  • Research-before-code protocol to eliminate hallucinations    ║
+# ║  • Intelligent autonomous loop: research→implement→validate→fix ║
 # ║  • 3-hour timeout, unlimited tokens, ling-2.6-1t                ║
 # ╚══════════════════════════════════════════════════════════════════╝
+
 name: "KawaiiForge: Autonomous AI Builder"
 
 on:
   workflow_dispatch:
     inputs:
       task_description:
-        description: 'Task for KawaiiForge'
+        description: "Task for KawaiiForge"
         required: true
         default: >-
           Build a production-grade Flask web application that converts files
@@ -27,9 +28,9 @@ on:
           logging, tests, accessibility (ARIA, keyboard nav), responsive design.
           Use best modern practices. ZERO stubs, ZERO TODOs, full implementation only.
       max_fix_iterations:
-        description: 'Maximum validation-fix cycles'
+        description: "Maximum validation-fix cycles"
         required: false
-        default: '25'
+        default: "25"
 
 concurrency:
   group: kawaiiforge-${{ github.ref }}
@@ -46,21 +47,30 @@ jobs:
       actions: write
 
     steps:
-      - name: Checkout
+      # ─────────────────────────────────────────────
+      # 1. CHECKOUT
+      # ─────────────────────────────────────────────
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      # ─────────────────────────────────────────────
+      # 2. LANGUAGE RUNTIMES
+      # ─────────────────────────────────────────────
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: "3.12"
 
       - name: Set up Node 20
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
 
+      # ─────────────────────────────────────────────
+      # 3. SYSTEM DEPENDENCIES
+      # ─────────────────────────────────────────────
       - name: Install system dependencies
         run: |
           sudo apt-get update -qq
@@ -68,35 +78,64 @@ jobs:
             build-essential cmake ninja-build \
             libssl-dev libsodium-dev \
             cppcheck \
-            libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
-            libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
-            libgbm1 libasound2 \
+            libnss3 libatk1.0-0 libatk-bridge2.0-0 \
+            libcups2 libdrm2 libxkbcommon0 \
+            libxcomposite1 libxdamage1 libxfixes3 \
+            libxrandr2 libgbm1 libasound2 \
             golang-go rustc cargo default-jdk
 
-      - name: Install Python & Node tools
+      # ─────────────────────────────────────────────
+      # 4. PYTHON & NODE TOOLING
+      # ─────────────────────────────────────────────
+      - name: Install Python tools
         run: |
           pip install -q --upgrade pip
-          pip install -q aider-chat uv
+          # uv provides the `uvx` binary needed for mcp-server-fetch
+          pip install -q uv
+          # Install aider with all extras so MCP support is included
+          pip install -q "aider-chat[help,browser]"
+
+      - name: Install Node tools & Playwright browser
+        run: |
           npm install -g @playwright/mcp@latest
+          # Install Chromium and its OS-level dependencies
           npx playwright install chromium --with-deps
 
-      - name: Write KawaiiForge Persona (PROMPT.md)
+      # ─────────────────────────────────────────────
+      # 5. WRITE STATIC CONFIG FILES
+      # ─────────────────────────────────────────────
+      - name: Write KawaiiForge persona (PROMPT.md)
         run: |
-          cat > PROMPT.md << 'EOF'
-          You are KawaiiForge — a world-class, gentle, and extremely thorough full-stack engineer who specializes in creating joyful, accessible, and production-grade software.
-          Your signature style is "kawaii engineering": clean, cute, empathetic interfaces combined with rock-solid, secure, well-tested backend code.
-          You always research APIs and best practices using the available MCP tools before writing any code.
-          You never use placeholders, TODOs, stubs, or abbreviated code. Every file you produce must be complete and ready for production.
-          EOF
+          cat > PROMPT.md << 'PERSONA_EOF'
+          You are KawaiiForge — a world-class, gentle, and extremely thorough
+          full-stack engineer who specialises in joyful, accessible,
+          production-grade software.
 
-      - name: Write .aider.mcp.json (Playwright + fetch)
+          Your signature style is "kawaii engineering": clean, cute, empathetic
+          interfaces combined with rock-solid, secure, well-tested backend code.
+
+          You always research APIs and best practices with the available MCP
+          tools before writing any code.
+
+          You never use placeholders, TODOs, stubs, or abbreviated code.
+          Every file you produce must be complete and ready for production.
+          PERSONA_EOF
+
+      - name: Write .aider.mcp.json
         run: |
-          cat > .aider.mcp.json << 'EOF'
+          # Playwright MCP — headless Chromium, no sandbox (CI-safe)
+          # Fetch MCP    — plain HTTP retrieval for raw docs / pypi / crates
+          cat > .aider.mcp.json << 'MCP_EOF'
           {
             "mcpServers": {
               "playwright": {
                 "command": "npx",
-                "args": ["@playwright/mcp@latest", "--headless", "--no-sandbox", "--browser=chromium"]
+                "args": [
+                  "@playwright/mcp@latest",
+                  "--headless",
+                  "--no-sandbox",
+                  "--browser=chromium"
+                ]
               },
               "fetch": {
                 "command": "uvx",
@@ -104,100 +143,196 @@ jobs:
               }
             }
           }
-          EOF
-          cat .aider.mcp.json
+          MCP_EOF
+          echo "=== .aider.mcp.json ===" && cat .aider.mcp.json
 
+      # ─────────────────────────────────────────────
+      # 6. WRITE THE AIDER PROMPT TO A FILE
+      #    (avoids ALL shell-quoting / heredoc escaping
+      #     problems with the --message flag)
+      # ─────────────────────────────────────────────
+      - name: Write aider prompt file
+        env:
+          TASK: ${{ github.event.inputs.task_description }}
+          MAX_ITERATIONS: ${{ github.event.inputs.max_fix_iterations }}
+        run: |
+          # Python handles multi-line env-var injection safely
+          python3 - << 'PY_EOF'
+          import os, textwrap
+
+          task = os.environ["TASK"]
+          max_iter = os.environ["MAX_ITERATIONS"]
+
+          prompt = textwrap.dedent(f"""
+          You are KawaiiForge — read PROMPT.md for your full persona.
+
+          ═══════════════════════════ MISSION ═══════════════════════════
+          {task}
+
+          ═══════════════════ AUTONOMOUS AGENT PROTOCOL ══════════════════
+
+          You are a fully autonomous software-engineering agent capable of
+          working in ANY programming language and framework.
+
+          ── PHASE 1 · RESEARCH ─────────────────────────────────────────
+          Before touching a single source file:
+          • Use the playwright MCP to open DuckDuckGo and search for every
+            library, framework, or API you intend to use.
+          • Navigate directly to official documentation pages, read the
+            current API surface via browser_snapshot, and confirm every
+            function signature, class name, and config option.
+          • Use the fetch MCP for raw pypi JSON, crates.io metadata, or
+            plain-text READMEs when you need version numbers.
+          • Never hallucinate or assume — verify everything first.
+
+          ── PHASE 2 · IMPLEMENT ────────────────────────────────────────
+          Produce a complete, production-grade project:
+          • All source files — zero stubs, zero TODOs, zero placeholders.
+          • Proper build system matching the chosen language stack
+            (pyproject.toml + uv, Cargo.toml, CMakeLists.txt, package.json …).
+          • Comprehensive automated tests (pytest / cargo test / jest / etc.).
+          • Security hardening: sanitise all inputs, limit upload sizes,
+            set secure headers, prevent path traversal.
+          • Full logging and structured error handling throughout.
+          • Accessibility: ARIA labels, keyboard navigation, skip-links,
+            high-contrast colours, minimum 18 pt body font.
+          • Kawaii UI (when the task involves a UI):
+            pastel pinks / blues / lavenders, sakura motifs, large friendly
+            buttons, cute animal/flower SVG icons, 3-step wizard flow,
+            drag-and-drop with clear visual feedback, joyful copy that never
+            intimidates elderly users.
+
+          ── PHASE 3 · validate.sh ──────────────────────────────────────
+          Create (or update) validate.sh that:
+            1. Installs / syncs all dependencies.
+            2. Compiles / builds the project.
+            3. Runs every test suite.
+            4. Runs linters and static-analysis tools.
+            5. Exits 0 ONLY when every step passes.
+          The script must be self-contained — CI will run it cold.
+
+          ── PHASE 4 · RUN ──────────────────────────────────────────────
+          Execute:  bash validate.sh
+
+          ── PHASE 5 · FIX LOOP ─────────────────────────────────────────
+          If validate.sh exits non-zero:
+          • Read every error line carefully.
+          • Use playwright / fetch MCP to research the root cause if needed.
+          • Apply a precise fix — never silence errors with try/except or
+            || true unless the failure is genuinely non-fatal.
+          • Commit the fix with a descriptive message.
+          • Return to PHASE 4.
+          Repeat until validate.sh exits 0.
+
+          You have effectively unlimited tokens and time (3-hour CI budget).
+          Do NOT summarise, do NOT ask for permission, do NOT stop early.
+          Max validation-fix cycles allowed: {max_iter}
+          """).strip()
+
+          with open("AIDER_PROMPT.md", "w") as fh:
+              fh.write(prompt + "\n")
+
+          print("Prompt written — first 20 lines:")
+          for line in prompt.splitlines()[:20]:
+              print(" ", line)
+          PY_EOF
+
+      # ─────────────────────────────────────────────
+      # 7. GIT BOOTSTRAP
+      # ─────────────────────────────────────────────
+      - name: Configure git and create feature branch
+        run: |
+          git config user.name  "kawaiiforge-bot"
+          git config user.email "kawaiiforge@ci.local"
+
+          BRANCH="kawaiiforge/${{ github.run_id }}"
+          git checkout -b "$BRANCH"
+
+          # Stage bootstrap files so aider has a clean working tree
+          git add README.md PROMPT.md .aider.mcp.json AIDER_PROMPT.md
+          git diff --cached --quiet || \
+            git commit -m "chore: KawaiiForge bootstrap files [skip ci]"
+
+      # ─────────────────────────────────────────────
+      # 8. KAWAIIFORGE AUTONOMOUS BUILD LOOP
+      # ─────────────────────────────────────────────
       - name: KawaiiForge — Autonomous Build Loop
         env:
           OPENAI_API_KEY: ${{ secrets.NOVITA_API_KEY }}
           OPENAI_API_BASE: "https://api.novita.ai/openai/v1"
-          MAX_ITERATIONS: ${{ github.event.inputs.max_fix_iterations }}
-          TASK: ${{ github.event.inputs.task_description }}
         run: |
           set -euo pipefail
 
-          git config user.name "kawaiiforge-bot"
-          git config user.email "kawaiiforge@ci.local"
-          git checkout -b "kawaiiforge/${{ github.run_id }}"
-
-          # Seed repo
-          touch README.md
-          git add README.md PROMPT.md .aider.mcp.json
-
           aider \
-            --model "openai/inclusionai/ling-2.6-1t" \
+            --model        "openai/inclusionai/ling-2.6-1t" \
+            --openai-api-base "${OPENAI_API_BASE}" \
             --yes-always \
             --auto-commits \
             --no-auto-lint \
             --no-stream \
-            --message "You are KawaiiForge.
+            --no-check-update \
+            --map-tokens 4096 \
+            --message-file AIDER_PROMPT.md \
+            PROMPT.md
 
-          Default mission (use this exact style and quality bar for this run):
-          $TASK
-
-          ███████████████ GENERAL AUTONOMOUS AGENT PROTOCOL ███████████████
-          You are a fully autonomous software engineering agent capable of working in ANY programming language and framework.
-
-          1. Analyze the task and choose the BEST language/stack for it.
-          2. Use the playwright MCP to research documentation (DuckDuckGo + direct navigation to official docs, StackOverflow, MDN, Flask docs, pandas docs, Rust book, etc.).
-          3. Create a complete production-grade project with:
-             - All source files (no stubs)
-             - Proper build system (CMake, Makefile, pyproject.toml, package.json, Cargo.toml, etc.)
-             - Comprehensive tests
-             - A validate.sh script that runs build → test → lint and exits 0 only on full success
-             - README with clear instructions
-             - Kawaii aesthetic when the task involves UI (large fonts, pastel colors, cute icons, high contrast, elderly-friendly design)
-
-          MANDATORY RESEARCH PROTOCOL:
-          - Before using ANY library, framework call, or API: use playwright to navigate DuckDuckGo or the official documentation site, then snapshot and read the exact current API.
-          - Never hallucinate function signatures, class names, or configuration options.
-
-          AUTONOMOUS EXECUTION LOOP:
-          PHASE 1: Research all required APIs and best practices using playwright MCP.
-          PHASE 2: Implement the complete project (all files, full functionality).
-          PHASE 3: Create or update validate.sh that performs:
-                    - Dependency installation
-                    - Build / compile
-                    - Run all tests
-                    - Lint / static analysis
-                    - Security checks where applicable
-          PHASE 4: Run ./validate.sh
-          PHASE 5: If it fails, analyze every error, research the fix using MCP if needed, fix the root cause, commit, and return to PHASE 4.
-          Continue looping until ./validate.sh exits with code 0.
-
-          You have effectively unlimited tokens and time (within the 3-hour CI limit). Do not summarize. Do not ask for permission. Produce only complete, high-quality, production-ready code.
-
-          Max validation cycles: $MAX_ITERATIONS
-          You must not stop until validate.sh succeeds."
-
+      # ─────────────────────────────────────────────
+      # 9. SANITY-CHECK: AGENT MUST HAVE COMMITTED
+      # ─────────────────────────────────────────────
+      - name: Verify agent produced commits
+        run: |
           COMMITS_AHEAD=$(git rev-list --count origin/main..HEAD 2>/dev/null || echo 0)
           echo "Commits ahead of main: $COMMITS_AHEAD"
-          if [ "$COMMITS_AHEAD" -eq 0 ]; then
-            echo "::error::KawaiiForge produced no commits."
+          if [ "$COMMITS_AHEAD" -le 1 ]; then
+            echo "::error::KawaiiForge produced no meaningful commits."
             exit 1
           fi
 
-      - name: Final Validation Run
+      # ─────────────────────────────────────────────
+      # 10. FINAL VALIDATION (cold run, no aider)
+      # ─────────────────────────────────────────────
+      - name: Final validation run
         run: |
-          if [ -f "validate.sh" ]; then
-            chmod +x validate.sh
-            echo "Running final validation..."
-            ./validate.sh || { echo "::error::Final validation failed after autonomous loop."; exit 1; }
-          else
-            echo "No validate.sh found — agent should have created one."
+          if [ ! -f "validate.sh" ]; then
+            echo "::error::validate.sh was not created by the agent."
             exit 1
           fi
+          chmod +x validate.sh
+          echo "════════════ Running final validate.sh ════════════"
+          ./validate.sh
+          echo "════════════ validate.sh exited 0 ✅ ════════════"
 
-      - name: SAST — cppcheck (if C/C++ present)
+      # ─────────────────────────────────────────────
+      # 11. OPTIONAL SAST (C/C++ only)
+      # ─────────────────────────────────────────────
+      - name: SAST — cppcheck (C/C++ projects only)
         if: always()
         run: |
-          if ls **/*.{cpp,cxx,h,hpp} 1> /dev/null 2>&1; then
-            cppcheck --enable=warning,style,performance,portability --std=c++20 \
-              --suppress=missingIncludeSystem --error-exitcode=1 --inline-suppr \
-              **/*.{cpp,cxx,h,hpp} || echo "::warning::cppcheck issues found"
+          # Use find instead of glob expansion to avoid "no match" errors
+          CPP_FILES=$(find . \
+            -not -path './.git/*' \
+            \( -name '*.cpp' -o -name '*.cxx' \
+               -o -name '*.h'  -o -name '*.hpp' \) \
+            2>/dev/null || true)
+
+          if [ -n "$CPP_FILES" ]; then
+            echo "Running cppcheck on C/C++ files..."
+            # shellcheck disable=SC2086
+            cppcheck \
+              --enable=warning,style,performance,portability \
+              --std=c++20 \
+              --suppress=missingIncludeSystem \
+              --error-exitcode=1 \
+              --inline-suppr \
+              $CPP_FILES \
+              || echo "::warning::cppcheck issues found — review before merge."
+          else
+            echo "No C/C++ files found — skipping cppcheck."
           fi
 
-      - name: Ship — Create PR
+      # ─────────────────────────────────────────────
+      # 12. SHIP — PUSH BRANCH & OPEN PR
+      # ─────────────────────────────────────────────
+      - name: Push branch and open pull request
         if: success()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -205,20 +340,29 @@ jobs:
           BRANCH="kawaiiforge/${{ github.run_id }}"
           git push -u origin "$BRANCH"
 
+          # Truncate task description to keep PR title readable
+          TASK_SHORT="${{ github.event.inputs.task_description }}"
+          TASK_SHORT="${TASK_SHORT:0:80}"
+
           gh pr create \
-            --title "🌸 KawaiiForge: ${{ github.event.inputs.task_description }}" \
-            --body "## KawaiiForge Report
+            --title "🌸 KawaiiForge: ${TASK_SHORT}…" \
+            --body "## 🌸 KawaiiForge Autonomous Build Report
 
-          | Item | Value |
-          |------|-------|
+          | Field | Value |
+          |-------|-------|
           | **Status** | ✅ Fully autonomous completion |
-          | **Agent** | KawaiiForge (Playwright MCP grounded) |
-          | **Model** | inclusionai/ling-2.6-1t |
-          | **Default Task** | Elderly-friendly kawaii file converter |
-          | **Capability** | Any language, any task |
-          | **Validation** | Multiple autonomous fix cycles until all tests pass |
-          | **Run** | [Link](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
+          | **Agent** | KawaiiForge (Playwright + Fetch MCP grounded) |
+          | **Model** | \`inclusionai/ling-2.6-1t\` via Novita AI |
+          | **MCP Tools** | Playwright (headless Chromium) + mcp-server-fetch |
+          | **Validation** | Autonomous fix loop until \`validate.sh\` exits 0 |
+          | **Run** | [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
 
-          Built with ❤️ by KawaiiForge — making software both powerful and adorable." \
+          ### Task
+          \`\`\`
+          ${{ github.event.inputs.task_description }}
+          \`\`\`
+
+          ---
+          Built with ❤️ by KawaiiForge — powerful software, adorable delivery 🌸" \
             --base main \
             --head "$BRANCH"
