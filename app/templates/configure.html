@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+
+{% block title %}Configure Conversion - File Converter{% endblock %}
+
+{% block content %}
+<div class="card" style="max-width: 800px; margin: 0 auto;">
+    <div class="steps-indicator">
+        <div class="step completed">
+            <span class="step-label">1</span>
+            <span class="step-label">Upload</span>
+        </div>
+        <div class="step active">
+            <span class="step-label">2</span>
+            <span class="step-label">Configure</span>
+        </div>
+        <div class="step">
+            <span class="step-label">3</span>
+            <span class="step-label">Download</span>
+        </div>
+    </div>
+
+    <div class="card-header">
+        <h1 class="card-title">Step 2: Configure Conversion</h1>
+        <p class="card-subtitle">Select your target format and review file details</p>
+    </div>
+
+    <div class="file-info-card">
+        <div class="file-info-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14 2z"/>
+                <polyline points="14 2 14 8 20 8"/>
+            </svg>
+        </div>
+        <div class="file-info-details">
+            <div class="file-info-name">{{ original_filename }}</div>
+            <div class="file-info-meta">
+                Source: <strong>{{ source_ext|upper }}</strong>
+            </div>
+        </div>
+        <span class="file-info-badge" style="background: rgba(0, 212, 170, 0.15);">{{ source_ext|upper }}</span>
+    </div>
+
+    <div class="card" style="background: var(--bg-secondary); border-color: var(--border-color); margin: 1.5rem 0;">
+        <h3 class="card-title" style="font-size: 1.125rem; margin-bottom: 1rem;">Select Target Format</h3>
+        <div class="format-selector" id="formatSelector">
+            {% for fmt in available_targets %}
+            <label class="format-option" tabindex="0">
+                <input type="radio" name="target_format" value="{{ fmt }}" required>
+                <div class="format-icon">
+                    {% if fmt == 'csv' %}
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14 2z"/>
+                        <polyline points="14 2 14 8 20 8"/>
+                        <line x1="8" y1="13" x2="16" y2="13"/>
+                        <line x1="8" y1="17" x2="16" y2="17"/>
+                    </svg>
+                    {% elif fmt == 'xlsx' %}
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14 2z"/>
+                        <polyline points="14 2 14 8 20 8"/>
+                        <path d="M8 18h8"/>
+                        <path d="M8 14h8"/>
+                        <path d="M8 10h8"/>
+                        <path d="M8 6h4"/>
+                    </svg>
+                    {% elif fmt == 'xls' %}
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14 2z"/>
+                        <polyline points="14 2 14 8 20 8"/>
+                        <path d="M8 18h4"/>
+                        <path d="M8 14h8"/>
+                        <path d="M8 10h8"/>
+                        <path d="M8 6h4"/>
+                    </svg>
+                    {% elif fmt == 'dbf' %}
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14 2z"/>
+                        <polyline points="14 2 14 8 20 8"/>
+                        <path d="M9 12h6"/>
+                        <path d="M9 16h6"/>
+                        <path d="M9 8h6"/>
+                    </svg>
+                    {% endif %}
+                </div>
+                <span class="format-label">{{ fmt|upper }}</span>
+                <span class="format-ext">{{ fmt }}</span>
+            </label>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="card" style="background: var(--bg-secondary); border-color: var(--border-color);">
+        <h3 class="card-title" style="font-size: 1.125rem; margin-bottom: 1rem;">File Details</h3>
+        
+        <div id="fileDetails">
+            <div class="file-details-grid" id="fileDetailsGrid">
+                <!-- Loaded via JS -->
+            </div>
+            
+            <div class="column-list" id="columnList" style="display: none;">
+                <div class="column-list-title">Columns</div>
+                <div id="columnItems"></div>
+            </div>
+        </div>
+
+        <div id="loadingDetails" class="loading-spinner" style="margin: 1rem auto; display: none;"></div>
+    </div>
+
+    <div id="statusMessage"></div>
+
+    <div class="actions-bar">
+        <a href="{{ url_for('main.index') }}" class="btn btn-secondary">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="19" y1="12" x2="5" y2="12"/>
+                <polyline points="12 19 5 12 12 5"/>
+            </svg>
+            Back
+        </a>
+        <button class="btn btn-primary" id="convertBtn" disabled>
+            Convert to <span id="targetFormatDisplay">---</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="5" y1="12" x2="19" y2="12"/>
+                <polyline points="12 5 19 12 12 19"/>
+            </svg>
+        </button>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const uploadConfig = {
+        step: 2,
+        sourceExt: '{{ source_ext }}'
+    };
+</script>
+{% endblock %}
