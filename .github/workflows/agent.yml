@@ -1,10 +1,10 @@
 # ╔══════════════════════════════════════════════════════════════════╗
-# ║                    KawaiiForge: Autonomous AI Builder           ║
-# ║  • Replaced aider with opencode-ai (true autonomous agent)     ║
-# ║  • opencode run = headless non-interactive CI mode              ║
-# ║  • Custom OpenAI-compatible provider via opencode.json          ║
-# ║  • Playwright MCP + Fetch MCP built into opencode natively      ║
-# ║  • 3-hour timeout, ling-2.6-1t via Novita AI                   ║
+# ║                    KawaiiForge: Autonomous AI Builder            ║
+# ║  • Replaced aider with opencode-ai (true autonomous agent)      ║
+# ║  • opencode run = headless non-interactive CI mode               ║
+# ║  • Custom OpenAI-compatible provider via opencode.json           ║
+# ║  • Playwright MCP + Fetch MCP built into opencode natively       ║
+# ║  • 3-hour timeout, ling-2.6-1t via Novita AI                    ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
 name: "KawaiiForge: Autonomous AI Builder"
@@ -53,6 +53,9 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # FIX #8 — persist-credentials: true (default) lets the
+          # GITHUB_TOKEN handle push auth automatically; no manual
+          # remote-URL rewriting needed.
 
       # ─────────────────────────────────────────────
       # 2. RUNTIMES
@@ -69,10 +72,12 @@ jobs:
 
       # ─────────────────────────────────────────────
       # 3. SYSTEM DEPENDENCIES
-      #    Ubuntu 24.04 Y2038 renames applied.
       # ─────────────────────────────────────────────
       - name: Install system dependencies
         run: |
+          # FIX #2 — strict shell mode on every run block
+          set -euo pipefail
+
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             build-essential cmake ninja-build \
@@ -94,48 +99,33 @@ jobs:
 
       # ─────────────────────────────────────────────
       # 4. INSTALL OPENCODE + PLAYWRIGHT MCP
-      #
-      #    opencode-ai  → the correct npm package name
-      #    @playwright/mcp → MCP server opencode uses
-      #    uvx / mcp-server-fetch → second MCP server
-      #
-      #    Playwright browsers installed for BOTH:
-      #      npx  → @playwright/mcp server
-      #      python -m playwright → fallback scraping
       # ─────────────────────────────────────────────
       - name: Install opencode and tooling
         run: |
+          # FIX #2 — strict shell mode
+          set -euo pipefail
+
           pip install -q --upgrade pip
           pip install -q uv playwright
 
-          # opencode: the autonomous agent replacing aider
+          # opencode: the autonomous agent
           npm install -g opencode-ai@latest
 
-          # MCP servers opencode will use for research
+          # MCP servers opencode uses for research
           npm install -g @playwright/mcp@latest
 
-          # Chromium for both MCP server and python playwright
+          # Chromium for MCP server and python playwright fallback
           npx playwright install chromium --with-deps
           python -m playwright install chromium --with-deps
 
           echo "=== Versions ==="
-          opencode --version || true
+          # FIX #10 — --version may not exist; keep || true, add help check
+          opencode --version 2>/dev/null || opencode run --help 2>/dev/null || true
           node --version
           python --version
 
       # ─────────────────────────────────────────────
       # 5. ATOMIC BOOTSTRAP
-      #    ONE shell — strict order:
-      #      A) git config + checkout -b
-      #      B) write opencode.json config
-      #      C) write AGENTS.md (opencode's native
-      #         instruction file, auto-loaded)
-      #      D) write KAWAII_PROMPT.md (full mission)
-      #      E) pre-authorise the Novita provider
-      #         (write auth.json directly — defence
-      #          against the known bug where options
-      #          are not forwarded to API calls)
-      #      F) git add + commit
       # ─────────────────────────────────────────────
       - name: Bootstrap — branch, write files, commit
         env:
@@ -144,25 +134,31 @@ jobs:
           RUN_ID:         ${{ github.run_id }}
           NOVITA_API_KEY: ${{ secrets.NOVITA_API_KEY }}
         run: |
+          # FIX #2 — strict shell mode
+          set -euo pipefail
+
+          # ── FIX #9 — Guard: fail fast if secret is missing ──────────
+          if [ -z "${NOVITA_API_KEY:-}" ]; then
+            echo "::error::NOVITA_API_KEY secret is not set. \
+          Add it under Settings → Secrets → Actions."
+            exit 1
+          fi
+
           # ── A) Git ─────────────────────────────────────────────────
-          git config user.name  "kawaiiforge-bot"
-          git config user.email "kawaiiforge@ci.local"
+          # FIX #5 — use canonical GitHub Actions bot identity
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "kawaiiforge/${RUN_ID}"
 
           # ── B) opencode.json ────────────────────────────────────────
-          # Configures:
-          #   • Novita AI as a custom OpenAI-compatible provider
-          #   • ling-2.6-1t as the model for the build agent
-          #   • Playwright MCP + Fetch MCP servers
-          #   • Full bash permissions (required for autonomous build)
-          #   • Auto-compact on to handle long sessions
-          #
-          # DEFENCE against options-not-forwarded bug (#5674):
-          #   apiKey is set BOTH inside options{} AND via auth.json
-          #   (written in step E below).
-          cat > opencode.json << OCJSON_EOF
-          {
-            "\$schema": "https://opencode.ai/config.json",
+          # FIX #3 — write via Python to avoid heredoc indentation
+          # artifacts and shell-injection risk from NOVITA_API_KEY
+          # containing special characters.
+          python3 - <<'PYEOF'
+          import os, json
+
+          cfg = {
+            "$schema": "https://opencode.ai/config.json",
             "model": "novita/inclusionai/ling-2.6-1t",
             "provider": {
               "novita": {
@@ -170,7 +166,7 @@ jobs:
                 "name": "Novita AI",
                 "options": {
                   "baseURL": "https://api.novita.ai/openai/v1",
-                  "apiKey": "${NOVITA_API_KEY}"
+                  "apiKey": os.environ["NOVITA_API_KEY"]
                 },
                 "models": {
                   "inclusionai/ling-2.6-1t": {
@@ -199,16 +195,21 @@ jobs:
                 "args": ["mcp-server-fetch"]
               }
             },
-            "autoshare": false,
-            "autocompact": true
+            "autoshare": False,
+            "autocompact": True
           }
-          OCJSON_EOF
-          echo "=== opencode.json written ==="
-          cat opencode.json
+
+          with open("opencode.json", "w") as f:
+            json.dump(cfg, f, indent=2)
+          print("=== opencode.json written ===")
+          print(json.dumps(cfg, indent=2).replace(
+              os.environ["NOVITA_API_KEY"], "***"
+          ))
+          PYEOF
 
           # ── C) AGENTS.md ────────────────────────────────────────────
-          # opencode auto-loads AGENTS.md as the system context.
-          # This is the canonical way to give persistent instructions.
+          # Quoted delimiter ('AGENTS_EOF') — no variable expansion
+          # inside the block, which is intentional for literal text.
           cat > AGENTS.md << 'AGENTS_EOF'
           # KawaiiForge Agent Instructions
 
@@ -236,8 +237,7 @@ jobs:
           AGENTS_EOF
 
           # ── D) KAWAII_PROMPT.md ─────────────────────────────────────
-          # Written via a /tmp Python script to avoid heredoc nesting.
-          cat > /tmp/gen_prompt.py << 'PYSCRIPT_EOF'
+          python3 - <<'PYSCRIPT_EOF'
           import os, textwrap
 
           task     = os.environ["TASK"]
@@ -314,29 +314,45 @@ jobs:
 
           with open("KAWAII_PROMPT.md", "w") as fh:
               fh.write(prompt + "\n")
-          print(f"KAWAII_PROMPT.md: {len(prompt)} chars, {len(prompt.splitlines())} lines")
+          print(f"KAWAII_PROMPT.md: {len(prompt)} chars, "
+                f"{len(prompt.splitlines())} lines")
           PYSCRIPT_EOF
-          python3 /tmp/gen_prompt.py
-          rm /tmp/gen_prompt.py
 
           # ── E) Pre-authorise Novita provider ───────────────────────
-          # Write auth.json directly so the API key is picked up even
-          # if the opencode.json options{} forwarding bug is present.
-          mkdir -p "${HOME}/.local/share/opencode"
-          cat > "${HOME}/.local/share/opencode/auth.json" << AUTHJSON_EOF
-          {
+          # FIX #4 — write auth.json via Python for the same
+          # safety reasons as opencode.json above.
+          python3 - <<'AUTHEOF'
+          import os, json
+
+          auth = {
             "novita": {
               "type": "api",
-              "key": "${NOVITA_API_KEY}"
+              "key": os.environ["NOVITA_API_KEY"]
             }
           }
-          AUTHJSON_EOF
-          echo "auth.json written (key redacted):"
-          cat "${HOME}/.local/share/opencode/auth.json" \
-            | sed 's/"key": ".*"/"key": "[REDACTED]"/'
+
+          auth_dir = os.path.expanduser("~/.local/share/opencode")
+          os.makedirs(auth_dir, exist_ok=True)
+          auth_path = os.path.join(auth_dir, "auth.json")
+
+          with open(auth_path, "w") as f:
+            json.dump(auth, f, indent=2)
+
+          # Redact key for log
+          redacted = dict(auth)
+          redacted["novita"] = dict(auth["novita"])
+          redacted["novita"]["key"] = "[REDACTED]"
+          print("auth.json written (key redacted):")
+          print(json.dumps(redacted, indent=2))
+          AUTHEOF
 
           # ── F) Stage and commit ─────────────────────────────────────
-          git add README.md opencode.json AGENTS.md KAWAII_PROMPT.md
+          # FIX #1 — PRIMARY FIX: --ignore-missing silently skips any
+          # pathspec that does not exist (e.g. README.md on an empty
+          # repo) instead of exiting 128.
+          git add --ignore-missing \
+            README.md opencode.json AGENTS.md KAWAII_PROMPT.md
+
           git diff --cached --quiet \
             || git commit -m "chore: KawaiiForge bootstrap [skip ci]"
 
@@ -347,19 +363,14 @@ jobs:
 
       # ─────────────────────────────────────────────
       # 6. KAWAIIFORGE AUTONOMOUS BUILD LOOP
-      #
-      #    opencode run  = fully non-interactive mode
-      #    --file        = attach prompt file to session
-      #    -q            = quiet (no spinner in CI logs)
-      #
-      #    AGENTS.md is auto-loaded by opencode as the
-      #    system prompt — no extra flag needed.
-      #    opencode.json is auto-loaded from CWD.
       # ─────────────────────────────────────────────
       - name: KawaiiForge — Autonomous Build Loop
         env:
           NOVITA_API_KEY: ${{ secrets.NOVITA_API_KEY }}
         run: |
+          # FIX #2 — strict shell mode
+          set -euo pipefail
+
           opencode run \
             --file KAWAII_PROMPT.md \
             -q \
@@ -372,10 +383,23 @@ jobs:
       # ─────────────────────────────────────────────
       - name: Verify agent produced commits
         run: |
-          COMMITS_AHEAD=$(git rev-list --count origin/main..HEAD 2>/dev/null || echo 0)
-          echo "Commits ahead of main: ${COMMITS_AHEAD}"
+          # FIX #2 — strict shell mode
+          set -euo pipefail
+
+          # FIX #13 — detect the default branch name dynamically
+          # instead of hardcoding 'main', which may not exist or
+          # may be named 'master' / something else.
+          DEFAULT_BRANCH=$(git rev-parse --abbrev-ref origin/HEAD \
+                           2>/dev/null | sed 's|origin/||' || echo "main")
+          echo "Default branch detected as: ${DEFAULT_BRANCH}"
+
+          COMMITS_AHEAD=$(git rev-list --count \
+            "origin/${DEFAULT_BRANCH}..HEAD" 2>/dev/null || echo 0)
+          echo "Commits ahead of ${DEFAULT_BRANCH}: ${COMMITS_AHEAD}"
+
           if [ "${COMMITS_AHEAD}" -le 1 ]; then
-            echo "::error::KawaiiForge produced no meaningful commits beyond bootstrap."
+            echo "::error::KawaiiForge produced no meaningful commits \
+          beyond bootstrap."
             exit 1
           fi
 
@@ -384,10 +408,14 @@ jobs:
       # ─────────────────────────────────────────────
       - name: Final validation run
         run: |
+          # FIX #2 — strict shell mode
+          set -euo pipefail
+
           if [ ! -f "validate.sh" ]; then
             echo "::error::validate.sh was not created by the agent."
             exit 1
           fi
+
           chmod +x validate.sh
           echo "════════════ Running final validate.sh ════════════"
           ./validate.sh
@@ -399,21 +427,32 @@ jobs:
       - name: SAST — cppcheck (C/C++ projects only)
         if: always()
         run: |
-          CPP_FILES=$(find . \
+          # FIX #2 — strict shell mode (errors inside || are safe)
+          set -euo pipefail
+
+          # FIX #11 — collect files safely with NUL delimiters and
+          # pass them to cppcheck via xargs -0 to handle filenames
+          # with spaces or special characters, and avoid word-splitting
+          # the unquoted $CPP_FILES variable.
+          CPP_FILE_COUNT=$(find . \
             -not -path './.git/*' \
             \( -name '*.cpp' -o -name '*.cxx' \
                -o -name '*.h'  -o -name '*.hpp' \) \
-            2>/dev/null || true)
-          if [ -n "$CPP_FILES" ]; then
-            echo "Running cppcheck..."
-            # shellcheck disable=SC2086
-            cppcheck \
-              --enable=warning,style,performance,portability \
-              --std=c++20 \
-              --suppress=missingIncludeSystem \
-              --error-exitcode=1 \
-              --inline-suppr \
-              $CPP_FILES \
+            -print 2>/dev/null | wc -l || echo 0)
+
+          if [ "${CPP_FILE_COUNT}" -gt 0 ]; then
+            echo "Running cppcheck on ${CPP_FILE_COUNT} file(s)..."
+            find . \
+              -not -path './.git/*' \
+              \( -name '*.cpp' -o -name '*.cxx' \
+                 -o -name '*.h'  -o -name '*.hpp' \) \
+              -print0 2>/dev/null \
+            | xargs -0 cppcheck \
+                --enable=warning,style,performance,portability \
+                --std=c++20 \
+                --suppress=missingIncludeSystem \
+                --error-exitcode=1 \
+                --inline-suppr \
               || echo "::warning::cppcheck issues found."
           else
             echo "No C/C++ files found — skipping cppcheck."
@@ -427,15 +466,22 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # FIX #2 — strict shell mode
+          set -euo pipefail
+
           BRANCH="kawaiiforge/${{ github.run_id }}"
-          git push -u origin "$BRANCH"
+          git push -u origin "${BRANCH}"
 
-          TASK_SHORT=$(echo "${{ github.event.inputs.task_description }}" \
-                       | cut -c1-80)
+          TASK_SHORT=$(printf '%s' \
+            "${{ github.event.inputs.task_description }}" \
+            | head -c 80)
 
-          gh pr create \
-            --title "🌸 KawaiiForge: ${TASK_SHORT}…" \
-            --body "## 🌸 KawaiiForge Autonomous Build Report
+          # FIX #12 — write PR body to a temp file so that backticks,
+          # quotes, or dollar signs in task_description cannot break
+          # the gh pr create argument parsing.
+          PR_BODY_FILE=$(mktemp)
+          cat > "${PR_BODY_FILE}" << PRBODY_EOF
+          ## 🌸 KawaiiForge Autonomous Build Report
 
           | Field | Value |
           |-------|-------|
@@ -453,6 +499,13 @@ jobs:
           \`\`\`
 
           ---
-          Built with ❤️ by KawaiiForge — powerful software, adorable delivery 🌸" \
+          Built with ❤️ by KawaiiForge — powerful software, adorable delivery 🌸
+          PRBODY_EOF
+
+          gh pr create \
+            --title "🌸 KawaiiForge: ${TASK_SHORT}…" \
+            --body-file "${PR_BODY_FILE}" \
             --base main \
-            --head "$BRANCH"
+            --head "${BRANCH}"
+
+          rm -f "${PR_BODY_FILE}"
