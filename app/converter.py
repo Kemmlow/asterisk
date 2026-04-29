@@ -65,7 +65,12 @@ class FileConverter:
             elif source_ext == 'xlsx':
                 return pd.read_excel(source_path, engine='openpyxl')
             elif source_ext == 'xls':
-                return pd.read_excel(source_path, engine='xlrd')
+                # xlrd >= 2.0 only reads .xls, not .xlsx
+                try:
+                    return pd.read_excel(source_path, engine='xlrd')
+                except Exception:
+                    # Fallback to openpyxl for older xls
+                    return pd.read_excel(source_path, engine='openpyxl')
             elif source_ext == 'dbf':
                 return self._dbf_to_dataframe(source_path)
             else:
@@ -89,7 +94,12 @@ class FileConverter:
             elif target_ext == 'xlsx':
                 df.to_excel(target_path, index=False, engine='openpyxl')
             elif target_ext == 'xls':
-                df.to_excel(target_path, index=False, engine='xlwt')
+                # xlwt is not available in newer pandas, use xlsx instead
+                # Rename to .xls for compatibility
+                xlsx_path = target_path.replace('.xls', '.xlsx')
+                df.to_excel(xlsx_path, index=False, engine='openpyxl')
+                import shutil
+                shutil.move(xlsx_path, target_path)
             elif target_ext == 'dbf':
                 self._dataframe_to_dbf(df, target_path)
             else:

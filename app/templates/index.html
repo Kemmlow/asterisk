@@ -79,8 +79,7 @@
 {% block scripts %}
 <script>
     const uploadConfig = {
-        step: 1,
-        csrfToken: '{{ csrf_token() if config.get("SECRET_KEY") else "" }}'
+        step: 1
     };
 </script>
 {% endblock %}

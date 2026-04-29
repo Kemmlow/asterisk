@@ -131,8 +131,7 @@
 <script>
     const uploadConfig = {
         step: 2,
-        sourceExt: '{{ source_ext }}',
-        csrfToken: '{{ csrf_token() if config.get("SECRET_KEY") else "" }}'
+        sourceExt: '{{ source_ext }}'
     };
 </script>
 {% endblock %}

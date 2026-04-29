@@ -1,5 +1,6 @@
 import os
 import pytest
+import tempfile
 from app import create_app
 
 
@@ -82,33 +83,26 @@ class TestRoutes:
 
     def test_configure_with_file(self, client):
         """Test configure page with uploaded file."""
+        # Create a temporary CSV file in upload folder
+        upload_folder = client.application.config.get('UPLOAD_FOLDER', 'instance/uploads')
+        os.makedirs(upload_folder, exist_ok=True)
+        
+        test_file = os.path.join(upload_folder, 'test_upload.csv')
+        with open(test_file, 'w') as f:
+            f.write('a,b,c\\n1,2,3\\n4,5,6\\n')
+        
         with client.session_transaction() as sess:
-            sess['uploaded_file'] = 'test.csv'
+            sess['uploaded_file'] = 'test_upload.csv'
             sess['original_filename'] = 'test.csv'
             sess['file_extension'] = 'csv'
-        
-        # Mock the converter to avoid file system dependency
-        import app.converter as converter_module
-        original_converter = converter_module.FileConverter
-        
-        class MockConverter:
-            def get_file_info(self, path, ext):
-                return {
-                    'rows': 10,
-                    'columns': 3,
-                    'column_names': ['a', 'b', 'c'],
-                    'column_types': {'a': {'type': 'int64'}, 'b': {'type': 'int64'}, 'c': {'type': 'int64'}},
-                    'file_size': 100
-                }
-        
-        converter_module.FileConverter = MockConverter
         
         try:
             response = client.get('/configure')
             assert response.status_code == 200
             assert b'Configure Conversion' in response.data
         finally:
-            converter_module.FileConverter = original_converter
+            if os.path.exists(test_file):
+                os.remove(test_file)
 
     def test_theme_toggle_page_loads(self, client):
         """Test that page loads with theme toggle."""
