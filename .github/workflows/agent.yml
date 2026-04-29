@@ -73,8 +73,6 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      # FIX: Use the official action to install .NET SDKs.
-      # This is the correct, idiomatic way for GitHub Actions.
       - name: Set up .NET 8 SDK
         uses: actions/setup-dotnet@v4
         with:
@@ -87,7 +85,6 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          # FIX: Removed 'dotnet-sdk-8' as it's now handled by actions/setup-dotnet.
           sudo apt-get install -y --no-install-recommends \
             build-essential cmake ninja-build pkg-config \
             libssl-dev libsodium-dev \
@@ -124,13 +121,11 @@ jobs:
           go    version
           rustc --version
           java  --version 2>&1 | head -1
-          # FIX: Add dotnet version check to confirm installation.
           dotnet --version
           opencode --version 2>/dev/null \
             || opencode run --help 2>/dev/null | head -3 \
             || echo "opencode installed (no --version flag)"
 
-      # ... (The rest of the workflow remains unchanged) ...
       # ──────────────────────────────────────────────────────────────
       # 5. SECRET GUARD
       # ──────────────────────────────────────────────────────────────
@@ -308,7 +303,9 @@ jobs:
           TASK: ${{ github.event.inputs.task }}
         run: |
           set -euo pipefail
-          opencode run -q "
+          # FIX: Removed the '-q' flag, which is not a valid option for 'opencode run'
+          # and was causing the command to fail by printing its help text.
+          opencode run "
           ## YOUR MISSION
 
           ${TASK}
