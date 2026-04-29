@@ -1,42 +1,33 @@
-# ╔══════════════════════════════════════════════════════════════════╗
-# ║                    KawaiiForge: Autonomous AI Builder            ║
-# ║  • Replaced aider with opencode-ai (true autonomous agent)      ║
-# ║  • opencode run = headless non-interactive CI mode               ║
-# ║  • Custom OpenAI-compatible provider via opencode.json           ║
-# ║  • Playwright MCP + Fetch MCP built into opencode natively       ║
-# ║  • 3-hour timeout, ling-2.6-1t via Novita AI                    ║
-# ╚══════════════════════════════════════════════════════════════════╝
+# ╔══════════════════════════════════════════════════════════════════════╗
+# ║  OmniForge — Hyper-Autonomous AI Software Builder                   ║
+# ║  • One prompt in → working, tested, validated PR out                 ║
+# ║  • Any language, any framework, any domain                           ║
+# ║  • opencode-ai in headless `run` mode (true zero-interaction)        ║
+# ║  • Agent self-selects stack, installs deps, writes tests, fixes      ║
+# ║  • Playwright MCP + Fetch MCP for live doc/API research              ║
+# ║  • ling-2.6-1t (131k ctx) via Novita AI                             ║
+# ╚══════════════════════════════════════════════════════════════════════╝
 
-name: "KawaiiForge: Autonomous AI Builder"
+name: "OmniForge: Hyper-Autonomous AI Builder"
 
 on:
   workflow_dispatch:
     inputs:
-      task_description:
-        description: "Task for KawaiiForge"
+      task:
+        description: "Describe what you want built (any language, any domain)"
         required: true
-        default: >-
-          Build a production-grade Flask web application that converts files
-          bidirectionally between CSV, XLSX, XLS, and DBF formats.
-          Target users: elderly staff. Style: cute, clean, unique, creative kawaii
-          aesthetic (pastel pinks, blues, lavenders, sakura motifs, big friendly
-          buttons with cute animal/flower icons, extremely large fonts, high
-          contrast, simple 3-step wizard interface, drag-and-drop, clear large-text
-          instructions, joyful and non-intimidating UI). Must be extremely easy to use.
-          Production quality: proper security (sanitize uploads), error handling,
-          logging, tests, accessibility (ARIA, keyboard nav), responsive design.
-          Use best modern practices. ZERO stubs, ZERO TODOs, full implementation only.
-      max_fix_iterations:
-        description: "Maximum validation-fix cycles"
+      model:
+        description: "Override model (optional)"
         required: false
-        default: "25"
+        default: "novita/inclusionai/ling-2.6-1t"
 
 concurrency:
-  group: kawaiiforge-${{ github.ref }}
+  # One run per ref — never cancel in progress (agent may be mid-fix)
+  group: omniforge-${{ github.ref }}-${{ github.run_id }}
   cancel-in-progress: false
 
 jobs:
-  kawaiiforge:
+  omniforge:
     runs-on: ubuntu-latest
     timeout-minutes: 180
     permissions:
@@ -46,43 +37,64 @@ jobs:
       actions: write
 
     steps:
-      # ─────────────────────────────────────────────
+      # ──────────────────────────────────────────────────────────────
       # 1. CHECKOUT
-      # ─────────────────────────────────────────────
+      # ──────────────────────────────────────────────────────────────
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          # FIX #8 — persist-credentials: true (default) lets the
-          # GITHUB_TOKEN handle push auth automatically; no manual
-          # remote-URL rewriting needed.
+          # persist-credentials: true (default) — GITHUB_TOKEN auth
+          # is baked into the local git config automatically.
+          # No manual remote-URL rewriting needed.
 
-      # ─────────────────────────────────────────────
-      # 2. RUNTIMES
-      # ─────────────────────────────────────────────
+      # ──────────────────────────────────────────────────────────────
+      # 2. LANGUAGE RUNTIMES
+      #    Pre-install all major runtimes so the agent can choose any
+      #    stack without needing to bootstrap its own toolchain.
+      # ──────────────────────────────────────────────────────────────
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Set up Node 20
+      - name: Set up Node.js 20
         uses: actions/setup-node@v4
         with:
           node-version: "20"
 
-      # ─────────────────────────────────────────────
-      # 3. SYSTEM DEPENDENCIES
-      # ─────────────────────────────────────────────
-      - name: Install system dependencies
-        run: |
-          # FIX #2 — strict shell mode on every run block
-          set -euo pipefail
+      - name: Set up Go (stable)
+        uses: actions/setup-go@v5
+        with:
+          go-version: "stable"
 
+      - name: Set up Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Set up Java 21 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      # ──────────────────────────────────────────────────────────────
+      # 3. SYSTEM PACKAGES
+      #    Everything an autonomous agent might reach for, including
+      #    Playwright's Chromium dependencies (Ubuntu 24 package names).
+      # ──────────────────────────────────────────────────────────────
+      - name: Install system packages
+        run: |
+          set -euo pipefail
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            build-essential cmake ninja-build \
+            build-essential cmake ninja-build pkg-config \
             libssl-dev libsodium-dev \
-            cppcheck \
+            cppcheck shellcheck \
+            sqlite3 postgresql-client \
+            ruby-full php-cli \
+            dotnet-sdk-8 \
             libnss3 \
             libatk1.0-0t64 \
             libatk-bridge2.0-0t64 \
@@ -94,87 +106,88 @@ jobs:
             libxfixes3 \
             libxrandr2 \
             libgbm1 \
-            libasound2t64 \
-            golang-go rustc cargo default-jdk
+            libasound2t64
 
-      # ─────────────────────────────────────────────
-      # 4. INSTALL OPENCODE + PLAYWRIGHT MCP
-      # ─────────────────────────────────────────────
-      - name: Install opencode and tooling
+      # ──────────────────────────────────────────────────────────────
+      # 4. OPENCODE + MCP SERVERS
+      # ──────────────────────────────────────────────────────────────
+      - name: Install opencode and MCP tooling
         run: |
-          # FIX #2 — strict shell mode
           set -euo pipefail
+          pip install -q --upgrade pip uv playwright
 
-          pip install -q --upgrade pip
-          pip install -q uv playwright
-
-          # opencode: the autonomous agent
+          # The autonomous agent
           npm install -g opencode-ai@latest
 
-          # MCP servers opencode uses for research
+          # MCP servers the agent uses for live research
           npm install -g @playwright/mcp@latest
 
-          # Chromium for MCP server and python playwright fallback
+          # Chromium for Playwright MCP server + Python fallback
           npx playwright install chromium --with-deps
           python -m playwright install chromium --with-deps
 
-          echo "=== Versions ==="
-          # FIX #10 — --version may not exist; keep || true, add help check
-          opencode --version 2>/dev/null || opencode run --help 2>/dev/null || true
-          node --version
+          echo "=== Runtime versions ==="
+          node  --version
           python --version
+          go    version
+          rustc --version
+          java  --version 2>&1 | head -1
+          # opencode --version may not exist on all builds; degrade gracefully
+          opencode --version 2>/dev/null \
+            || opencode run --help 2>/dev/null | head -3 \
+            || echo "opencode installed (no --version flag)"
 
-      # ─────────────────────────────────────────────
-      # 5. ATOMIC BOOTSTRAP
-      # ─────────────────────────────────────────────
-      - name: Bootstrap — branch, write files, commit
+      # ──────────────────────────────────────────────────────────────
+      # 5. SECRET GUARD
+      #    Fail immediately with a clear message rather than letting
+      #    opencode fail silently inside a 3-hour session.
+      # ──────────────────────────────────────────────────────────────
+      - name: Guard — verify NOVITA_API_KEY is present
         env:
-          TASK:           ${{ github.event.inputs.task_description }}
-          MAX_ITERATIONS: ${{ github.event.inputs.max_fix_iterations }}
-          RUN_ID:         ${{ github.run_id }}
           NOVITA_API_KEY: ${{ secrets.NOVITA_API_KEY }}
         run: |
-          # FIX #2 — strict shell mode
           set -euo pipefail
-
-          # ── FIX #9 — Guard: fail fast if secret is missing ──────────
           if [ -z "${NOVITA_API_KEY:-}" ]; then
-            echo "::error::NOVITA_API_KEY secret is not set. \
-          Add it under Settings → Secrets → Actions."
+            echo "::error::NOVITA_API_KEY secret is not set."
+            echo "::error::Add it under Settings → Secrets → Actions."
             exit 1
           fi
+          echo "✅ NOVITA_API_KEY present (${#NOVITA_API_KEY} chars)"
 
-          # ── A) Git ─────────────────────────────────────────────────
-          # FIX #5 — use canonical GitHub Actions bot identity
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -b "kawaiiforge/${RUN_ID}"
-
-          # ── B) opencode.json ────────────────────────────────────────
-          # FIX #3 — write via Python to avoid heredoc indentation
-          # artifacts and shell-injection risk from NOVITA_API_KEY
-          # containing special characters.
-          python3 - <<'PYEOF'
+      # ──────────────────────────────────────────────────────────────
+      # 6. CONFIGURE OPENCODE
+      #    Written via Python (json.dump) so that special characters
+      #    in the API key (quotes, $, backslashes) cannot break JSON
+      #    or cause shell injection — heredocs are not safe here.
+      # ──────────────────────────────────────────────────────────────
+      - name: Configure opencode (opencode.json + auth.json)
+        env:
+          NOVITA_API_KEY: ${{ secrets.NOVITA_API_KEY }}
+          OC_MODEL: ${{ github.event.inputs.model }}
+        run: |
+          set -euo pipefail
+          python3 << 'PYEOF'
           import os, json
 
+          key   = os.environ["NOVITA_API_KEY"]
+          model = os.environ.get("OC_MODEL", "novita/inclusionai/ling-2.6-1t")
+
+          # ── opencode.json (project config) ─────────────────────────
           cfg = {
             "$schema": "https://opencode.ai/config.json",
-            "model": "novita/inclusionai/ling-2.6-1t",
+            "model": model,
             "provider": {
               "novita": {
                 "npm": "@ai-sdk/openai-compatible",
                 "name": "Novita AI",
                 "options": {
                   "baseURL": "https://api.novita.ai/openai/v1",
-                  "apiKey": os.environ["NOVITA_API_KEY"]
+                  "apiKey": key
                 },
                 "models": {
                   "inclusionai/ling-2.6-1t": {
                     "name": "Ling 2.6 1T",
-                    "limit": {
-                      "context": 131072,
-                      "output": 16384
-                    }
+                    "limit": {"context": 131072, "output": 16384}
                   }
                 }
               }
@@ -184,10 +197,8 @@ jobs:
                 "command": "npx",
                 "args": [
                   "@playwright/mcp@latest",
-                  "--headless",
-                  "--isolated",
-                  "--no-sandbox",
-                  "--browser=chromium"
+                  "--headless", "--isolated",
+                  "--no-sandbox", "--browser=chromium"
                 ]
               },
               "fetch": {
@@ -195,317 +206,421 @@ jobs:
                 "args": ["mcp-server-fetch"]
               }
             },
-            "autoshare": False,
+            "autoshare":   False,
             "autocompact": True
           }
 
           with open("opencode.json", "w") as f:
             json.dump(cfg, f, indent=2)
-          print("=== opencode.json written ===")
-          print(json.dumps(cfg, indent=2).replace(
-              os.environ["NOVITA_API_KEY"], "***"
-          ))
-          PYEOF
 
-          # ── C) AGENTS.md ────────────────────────────────────────────
-          # Quoted delimiter ('AGENTS_EOF') — no variable expansion
-          # inside the block, which is intentional for literal text.
-          cat > AGENTS.md << 'AGENTS_EOF'
-          # KawaiiForge Agent Instructions
+          # Log with key redacted
+          safe = json.loads(json.dumps(cfg))
+          safe["provider"]["novita"]["options"]["apiKey"] = "***"
+          print("=== opencode.json ===")
+          print(json.dumps(safe, indent=2))
 
-          You are KawaiiForge — a world-class, gentle, and extremely thorough
-          full-stack engineer who specialises in joyful, accessible,
-          production-grade software.
-
-          ## Core identity
-          Your signature style is "kawaii engineering": clean, cute, empathetic
-          interfaces combined with rock-solid, secure, well-tested backend code.
-
-          ## Absolute rules
-          - NEVER use placeholders, TODOs, stubs, or abbreviated code.
-          - NEVER stop mid-task or ask for permission.
-          - NEVER summarise instead of implementing.
-          - Every file you produce must be complete and ready for production.
-          - Always verify library APIs with MCP tools before writing code.
-
-          ## Tool usage
-          - Use the playwright MCP tool to navigate documentation sites and
-            confirm exact API signatures before using any library.
-          - Use the fetch MCP tool to retrieve raw package metadata from
-            package registries using real package names only.
-          - Never construct URLs with angle-bracket placeholders.
-          AGENTS_EOF
-
-          # ── D) KAWAII_PROMPT.md ─────────────────────────────────────
-          python3 - <<'PYSCRIPT_EOF'
-          import os, textwrap
-
-          task     = os.environ["TASK"]
-          max_iter = os.environ["MAX_ITERATIONS"]
-
-          prompt = textwrap.dedent(f"""
-          # KawaiiForge Mission
-
-          ## Task
-          {task}
-
-          ## Autonomous Agent Protocol
-
-          You are a fully autonomous software-engineering agent capable of
-          working in ANY programming language and framework.
-
-          ### PHASE 1 — RESEARCH
-          Before writing any code, use MCP tools to verify every library,
-          API, and configuration option you plan to use.
-
-          Playwright MCP (browser_navigate, browser_snapshot, browser_click):
-            - Search DuckDuckGo for each dependency.
-            - Navigate to official documentation sites.
-            - Read the current API surface and confirm exact class names,
-              function signatures, and parameter names.
-            - Check package registries for current stable versions.
-
-          Fetch MCP:
-            - Retrieve raw package metadata from package registries using
-              real package names only (never angle-bracket placeholders).
-
-          Never assume or hallucinate — verify every detail before coding.
-
-          ### PHASE 2 — IMPLEMENT
-          Produce a complete, production-grade project:
-          - All source files with zero stubs, zero TODOs, zero placeholders.
-          - Correct build system for the chosen stack.
-          - Comprehensive automated test suite.
-          - Security: sanitise all inputs, limit upload sizes, set secure
-            headers, prevent path traversal.
-          - Full structured logging and error handling throughout.
-          - Accessibility: ARIA labels, keyboard nav, skip-links,
-            high-contrast colours, minimum 18pt body font.
-          - Kawaii UI (when the task involves a user interface):
-            pastel pinks, blues, lavenders, sakura motifs, large friendly
-            buttons with cute SVG animal/flower icons, 3-step wizard flow,
-            drag-and-drop with clear visual feedback, joyful copy that
-            never intimidates elderly users.
-
-          ### PHASE 3 — validate.sh
-          Create or update validate.sh at the repo root that:
-            1. Installs and syncs all dependencies.
-            2. Compiles or builds the project.
-            3. Runs every test suite.
-            4. Runs linters and static-analysis tools.
-            5. Exits 0 only when every prior step passes.
-          The script must be fully self-contained — CI runs it cold.
-
-          ### PHASE 4 — RUN
-          Execute: bash validate.sh
-
-          ### PHASE 5 — FIX LOOP
-          If validate.sh exits non-zero:
-          - Read every error line carefully.
-          - Research the root cause with MCP tools if needed.
-          - Apply a precise surgical fix.
-          - Commit with a descriptive message.
-          - Return to PHASE 4.
-
-          Repeat until validate.sh exits 0.
-          Do NOT summarise. Do NOT ask for permission. Do NOT stop early.
-          Max validation-fix cycles: {max_iter}
-          """).strip()
-
-          with open("KAWAII_PROMPT.md", "w") as fh:
-              fh.write(prompt + "\n")
-          print(f"KAWAII_PROMPT.md: {len(prompt)} chars, "
-                f"{len(prompt.splitlines())} lines")
-          PYSCRIPT_EOF
-
-          # ── E) Pre-authorise Novita provider ───────────────────────
-          # FIX #4 — write auth.json via Python for the same
-          # safety reasons as opencode.json above.
-          python3 - <<'AUTHEOF'
-          import os, json
-
-          auth = {
-            "novita": {
-              "type": "api",
-              "key": os.environ["NOVITA_API_KEY"]
-            }
-          }
-
+          # ── auth.json (defence-in-depth against options-forwarding bug)
           auth_dir = os.path.expanduser("~/.local/share/opencode")
           os.makedirs(auth_dir, exist_ok=True)
-          auth_path = os.path.join(auth_dir, "auth.json")
+          with open(f"{auth_dir}/auth.json", "w") as f:
+            json.dump({"novita": {"type": "api", "key": key}}, f, indent=2)
 
-          with open(auth_path, "w") as f:
-            json.dump(auth, f, indent=2)
+          print("✅ opencode.json + auth.json written")
+          PYEOF
 
-          # Redact key for log
-          redacted = dict(auth)
-          redacted["novita"] = dict(auth["novita"])
-          redacted["novita"]["key"] = "[REDACTED]"
-          print("auth.json written (key redacted):")
-          print(json.dumps(redacted, indent=2))
-          AUTHEOF
+      # ──────────────────────────────────────────────────────────────
+      # 7. WRITE AGENTS.md
+      #    opencode auto-loads AGENTS.md as persistent system context.
+      #    This defines the agent's identity, rules, and tool protocol
+      #    for the entire session — language and domain agnostic.
+      # ──────────────────────────────────────────────────────────────
+      - name: Write AGENTS.md (agent system context)
+        run: |
+          set -euo pipefail
+          # Single-quoted delimiter → no variable expansion (intentional)
+          cat > AGENTS.md << 'EOF'
+          # OmniForge — Hyper-Autonomous Engineering Agent
 
-          # ── F) Stage and commit ─────────────────────────────────────
-          # FIX #1 — PRIMARY FIX: --ignore-missing silently skips any
-          # pathspec that does not exist (e.g. README.md on an empty
-          # repo) instead of exiting 128.
-          git add --ignore-missing \
-            README.md opencode.json AGENTS.md KAWAII_PROMPT.md
+          ## Identity
+          You are OmniForge, a world-class autonomous software engineering agent.
+          You are a polyglot expert across every mainstream language and framework:
+          Python, JavaScript, TypeScript, Go, Rust, Java, Kotlin, C, C++, C#,
+          Ruby, PHP, Elixir, Haskell, Swift, Dart, Shell, SQL, and more.
+          You pick the right tool for the job — not the trendy one.
+          You operate with ZERO human supervision, ZERO external prompts mid-run.
 
+          ## Non-negotiable rules
+          1. NEVER produce stubs, TODOs, placeholders, or "left as exercise" code.
+          2. NEVER ask for clarification — infer intent, make a decision, build it.
+          3. NEVER stop before validate.sh exits 0.
+          4. NEVER summarise instead of implementing.
+          5. ALWAYS verify every library API with MCP tools before writing code.
+          6. ALWAYS commit after each logical unit of work with a clear message.
+          7. Every file you produce must be complete, tested, and production-ready.
+
+          ## MCP tool protocol
+          ### Playwright MCP (browser_navigate, browser_snapshot, browser_click)
+          - Use for: reading official documentation, API surfaces, changelogs,
+            migration guides, exact function signatures, parameter names,
+            configuration schemas, and current stable release versions.
+          - Workflow: navigate → snapshot → extract exact details → code.
+
+          ### Fetch MCP
+          - Use for: raw package registry metadata (PyPI JSON API, npm registry,
+            crates.io API, pkg.go.dev, RubyGems API, etc.), README files,
+            specification documents.
+          - Always use real, fully-qualified package names — never placeholders.
+
+          ### Research discipline
+          - Research BEFORE coding. Do not trust memory for API details.
+          - If a library has changed its API, use the version-specific docs.
+          - Prefer the official docs over third-party blog posts.
+
+          ## validate.sh contract
+          The script at the repo root MUST:
+          - Be 100% self-contained — CI runs it cold on a fresh Ubuntu machine.
+          - Install ALL dependencies for the chosen stack.
+          - Build or compile the project (if applicable to the stack).
+          - Run the complete test suite with a non-zero exit on any failure.
+          - Run all applicable linters and static-analysis tools.
+          - Exit 0 only when ALL prior steps pass.
+          - Never silently swallow errors.
+
+          ## Output quality bar
+          - Security: validate all inputs, prevent injection, path traversal,
+            unsafe deserialization; set secure headers; limit upload sizes.
+          - Testing: unit tests + integration tests where applicable; aim for
+            meaningful coverage, not just line coverage theatre.
+          - Error handling: structured logging, graceful degradation, no bare
+            except/catch that swallows errors silently.
+          - Documentation: README.md with setup, usage, and architecture notes.
+          - If a UI: semantic HTML, ARIA labels, keyboard navigation, skip links,
+            high contrast, responsive — accessible by default.
+          - If a CLI: --help, proper exit codes, POSIX-compatible where possible.
+          - If a library: public API documented, versioned, idiomatic for language.
+          EOF
+          echo "✅ AGENTS.md written ($(wc -l < AGENTS.md) lines)"
+
+      # ──────────────────────────────────────────────────────────────
+      # 8. GIT BOOTSTRAP
+      #    Create the feature branch and commit all config files.
+      #    FIX: use `git add -A` — stages everything that exists,
+      #    no risk of exit 128 from listing files that may not exist.
+      #    (--ignore-missing requires --dry-run and cannot be used
+      #    for actual staging)
+      # ──────────────────────────────────────────────────────────────
+      - name: Bootstrap git branch
+        env:
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "omniforge/${RUN_ID}"
+
+          # `git add -A` stages every new/modified/deleted file safely.
+          # No risk of exit 128 from absent pathspecs.
+          git add -A
           git diff --cached --quiet \
-            || git commit -m "chore: KawaiiForge bootstrap [skip ci]"
+            || git commit -m "chore: OmniForge bootstrap [skip ci]"
 
-          echo ""
-          echo "=== Bootstrap complete ==="
-          git log --oneline -5
-          ls -lah
+          echo "✅ Branch ready: omniforge/${RUN_ID}"
+          git log --oneline -3
 
-      # ─────────────────────────────────────────────
-      # 6. KAWAIIFORGE AUTONOMOUS BUILD LOOP
-      # ─────────────────────────────────────────────
-      - name: KawaiiForge — Autonomous Build Loop
+      # ──────────────────────────────────────────────────────────────
+      # 9. OMNIFORGE AUTONOMOUS BUILD
+      #    The entire implementation, testing, and fix loop happens
+      #    here inside opencode. The agent:
+      #      • researches the stack with MCP tools
+      #      • implements the full solution
+      #      • writes validate.sh
+      #      • runs validate.sh
+      #      • fixes failures and loops until exit 0
+      #    No manual iteration. No phases managed by the workflow.
+      #    The agent manages its own loop autonomously.
+      # ──────────────────────────────────────────────────────────────
+      - name: OmniForge — Autonomous Build
         env:
           NOVITA_API_KEY: ${{ secrets.NOVITA_API_KEY }}
+          TASK: ${{ github.event.inputs.task }}
         run: |
-          # FIX #2 — strict shell mode
           set -euo pipefail
+          opencode run -q "
+          ## YOUR MISSION
 
-          opencode run \
-            --file KAWAII_PROMPT.md \
-            -q \
-            "Execute the full autonomous agent protocol in KAWAII_PROMPT.md.
-             Read AGENTS.md for your persona and rules.
-             Do not stop until validate.sh exits 0."
+          ${TASK}
 
-      # ─────────────────────────────────────────────
-      # 7. VERIFY AGENT PRODUCED COMMITS
-      # ─────────────────────────────────────────────
-      - name: Verify agent produced commits
+          ## HOW TO EXECUTE (follow exactly, in order)
+
+          ### STEP 1 — RESEARCH
+          Before writing a single line of code, use your MCP tools to verify
+          every library, package, framework, and API you plan to use.
+
+          For each major dependency:
+          - Use the Playwright MCP to navigate its official documentation.
+          - Read the current stable version's API surface.
+          - Note exact class names, function signatures, config keys, and
+            any breaking changes in recent releases.
+          - Use the Fetch MCP to retrieve package registry metadata and
+            confirm the current stable version number.
+
+          Do this for ALL dependencies, not just the main one.
+          Do not proceed to STEP 2 until research is complete.
+
+          ### STEP 2 — IMPLEMENT
+          Build the complete, production-grade solution. Standards:
+
+          COMPLETENESS
+          - Every file complete. Zero stubs. Zero TODOs. Zero placeholders.
+          - Every function implemented. Every edge case handled.
+          - Every error path returns a sensible response or exit code.
+
+          CORRECTNESS
+          - Use the exact APIs you verified in STEP 1.
+          - Use idiomatic patterns for the chosen language/framework.
+          - Handle all error paths explicitly — no silent failures.
+
+          SECURITY
+          - Validate and sanitise all user inputs.
+          - Prevent path traversal, injection, and unsafe deserialization.
+          - Set security headers (if HTTP). Limit upload sizes (if files).
+          - Never log secrets or sensitive data.
+
+          TESTING
+          - Write a comprehensive test suite: unit + integration.
+          - Tests must be runnable non-interactively in CI.
+          - Tests must be deterministic (no random seeds, no time-dependent
+            assertions without mocking).
+
+          LOGGING
+          - Structured logging throughout (not print/console.log scatter).
+          - Log levels used correctly: DEBUG, INFO, WARN, ERROR.
+
+          DOCUMENTATION
+          - README.md with: purpose, prerequisites, installation, usage,
+            architecture overview, and how to run tests.
+
+          UI TASKS (only if the task involves a user interface)
+          - Semantic HTML5, ARIA roles, keyboard navigable, skip links.
+          - Responsive layout (mobile-first).
+          - High contrast, minimum 16px body font, clear visual hierarchy.
+          - Design appropriate for the users described in the task.
+
+          CLI TASKS (only if the task involves a command-line tool)
+          - --help flag with full usage text.
+          - Correct POSIX exit codes (0=success, 1=general error, 2=misuse).
+          - Handle SIGINT/SIGTERM gracefully.
+
+          LIBRARY/API TASKS (only if the task involves a library or API)
+          - Full public API documentation (docstrings / JSDoc / godoc etc.).
+          - Versioned (e.g. a proper go.mod / package.json / pyproject.toml).
+          - Idiomatic for the language.
+
+          Commit logical units of work with descriptive commit messages
+          as you go. Do not batch everything into one giant commit at the end.
+
+          ### STEP 3 — WRITE validate.sh
+          Create validate.sh at the repo root.
+          Requirements (strict — CI runs this cold on a fresh Ubuntu 24 machine):
+          - #!/usr/bin/env bash at the top.
+          - set -euo pipefail immediately after the shebang.
+          - Install ALL dependencies for your chosen stack from scratch.
+          - Build / compile the project (if applicable).
+          - Run the complete test suite. A single test failure = non-zero exit.
+          - Run linters and static analysis tools.
+          - Print a clear success message and exit 0 only when all steps pass.
+          - Never use 'exit 0' to paper over failures.
+
+          ### STEP 4 — RUN validate.sh
+          Execute exactly: bash validate.sh
+
+          If it exits 0 → go to STEP 5.
+          If it exits non-zero → go to STEP 4-FIX.
+
+          ### STEP 4-FIX — Fix loop (repeat until exit 0)
+          - Read the COMPLETE error output — do not skim.
+          - Identify the root cause precisely.
+          - If the root cause is unclear, use MCP tools to research it.
+          - Apply a minimal, surgical fix to the affected code.
+          - Do NOT add workarounds that mask errors (e.g. '|| true').
+          - Do NOT modify the test to accept wrong output.
+          - Commit the fix with a message explaining what was broken.
+          - Run bash validate.sh again.
+          - Repeat until exit 0.
+
+          ### STEP 5 — FINISH
+          - Commit any remaining uncommitted changes.
+          - Output a short summary (3-5 lines) of what was built and how
+            to use it.
+
+          ## ABSOLUTE RULES
+          - Do NOT ask questions. There is no human to answer.
+          - Do NOT stop early because something seems hard.
+          - Do NOT produce incomplete files and promise to continue later.
+          - Do NOT use 'pass', '# TODO', 'raise NotImplementedError',
+            placeholder functions, or any form of stub.
+          - You have full bash/shell access — install anything you need.
+          - Read AGENTS.md for your full identity, rules, and tool protocol.
+          "
+
+      # ──────────────────────────────────────────────────────────────
+      # 10. VERIFY AGENT PRODUCED COMMITS
+      # ──────────────────────────────────────────────────────────────
+      - name: Verify agent produced meaningful commits
         run: |
-          # FIX #2 — strict shell mode
           set -euo pipefail
-
-          # FIX #13 — detect the default branch name dynamically
-          # instead of hardcoding 'main', which may not exist or
-          # may be named 'master' / something else.
-          DEFAULT_BRANCH=$(git rev-parse --abbrev-ref origin/HEAD \
-                           2>/dev/null | sed 's|origin/||' || echo "main")
-          echo "Default branch detected as: ${DEFAULT_BRANCH}"
-
-          COMMITS_AHEAD=$(git rev-list --count \
-            "origin/${DEFAULT_BRANCH}..HEAD" 2>/dev/null || echo 0)
-          echo "Commits ahead of ${DEFAULT_BRANCH}: ${COMMITS_AHEAD}"
-
-          if [ "${COMMITS_AHEAD}" -le 1 ]; then
-            echo "::error::KawaiiForge produced no meaningful commits \
-          beyond bootstrap."
+          # Detect default branch dynamically — do not hardcode 'main'
+          DEFAULT=$(git rev-parse --abbrev-ref origin/HEAD \
+                    2>/dev/null | sed 's|origin/||' || echo "main")
+          AHEAD=$(git rev-list --count "origin/${DEFAULT}..HEAD" \
+                  2>/dev/null || echo 0)
+          echo "Default branch : ${DEFAULT}"
+          echo "Commits ahead  : ${AHEAD}"
+          if [ "${AHEAD}" -lt 2 ]; then
+            echo "::error::Agent produced no commits beyond bootstrap."
+            echo "::error::The build likely failed silently or the model"
+            echo "::error::refused to produce output. Check the build log."
             exit 1
           fi
+          echo "✅ Agent committed ${AHEAD} change(s)"
 
-      # ─────────────────────────────────────────────
-      # 8. FINAL COLD VALIDATION RUN
-      # ─────────────────────────────────────────────
-      - name: Final validation run
+      # ──────────────────────────────────────────────────────────────
+      # 11. FINAL COLD VALIDATION
+      #     Run validate.sh one more time from a clean state to confirm
+      #     the agent's fix loop truly converged.
+      # ──────────────────────────────────────────────────────────────
+      - name: Final cold validation run
         run: |
-          # FIX #2 — strict shell mode
           set -euo pipefail
-
-          if [ ! -f "validate.sh" ]; then
-            echo "::error::validate.sh was not created by the agent."
+          if [ ! -f validate.sh ]; then
+            echo "::error::validate.sh does not exist."
+            echo "::error::The agent did not complete the build."
             exit 1
           fi
-
           chmod +x validate.sh
-          echo "════════════ Running final validate.sh ════════════"
+          echo "══════════════════════════════════════"
+          echo "  Running final validate.sh cold run  "
+          echo "══════════════════════════════════════"
           ./validate.sh
-          echo "════════════ validate.sh exited 0 ✅ ════════════"
+          echo ""
+          echo "══════════════════════════════════════"
+          echo "  ✅  validate.sh exited 0            "
+          echo "══════════════════════════════════════"
 
-      # ─────────────────────────────────────────────
-      # 9. OPTIONAL SAST (C/C++ only)
-      # ─────────────────────────────────────────────
-      - name: SAST — cppcheck (C/C++ projects only)
+      # ──────────────────────────────────────────────────────────────
+      # 12. SAST — cppcheck (C/C++ files if present)
+      # ──────────────────────────────────────────────────────────────
+      - name: SAST — cppcheck
         if: always()
         run: |
-          # FIX #2 — strict shell mode (errors inside || are safe)
           set -euo pipefail
-
-          # FIX #11 — collect files safely with NUL delimiters and
-          # pass them to cppcheck via xargs -0 to handle filenames
-          # with spaces or special characters, and avoid word-splitting
-          # the unquoted $CPP_FILES variable.
-          CPP_FILE_COUNT=$(find . \
-            -not -path './.git/*' \
-            \( -name '*.cpp' -o -name '*.cxx' \
+          COUNT=$(find . -not -path './.git/*' \
+            \( -name '*.cpp' -o -name '*.cxx' -o -name '*.c' \
                -o -name '*.h'  -o -name '*.hpp' \) \
-            -print 2>/dev/null | wc -l || echo 0)
-
-          if [ "${CPP_FILE_COUNT}" -gt 0 ]; then
-            echo "Running cppcheck on ${CPP_FILE_COUNT} file(s)..."
-            find . \
-              -not -path './.git/*' \
-              \( -name '*.cpp' -o -name '*.cxx' \
+            2>/dev/null | wc -l || echo 0)
+          if [ "${COUNT}" -gt 0 ]; then
+            echo "cppcheck: scanning ${COUNT} file(s)..."
+            # -print0 | xargs -0: handles filenames with spaces safely
+            find . -not -path './.git/*' \
+              \( -name '*.cpp' -o -name '*.cxx' -o -name '*.c' \
                  -o -name '*.h'  -o -name '*.hpp' \) \
-              -print0 2>/dev/null \
-            | xargs -0 cppcheck \
+              -print0 | xargs -0 cppcheck \
                 --enable=warning,style,performance,portability \
                 --std=c++20 \
                 --suppress=missingIncludeSystem \
                 --error-exitcode=1 \
                 --inline-suppr \
-              || echo "::warning::cppcheck issues found."
+              || echo "::warning::cppcheck found issues (non-blocking)"
           else
             echo "No C/C++ files found — skipping cppcheck."
           fi
 
-      # ─────────────────────────────────────────────
-      # 10. SHIP — PUSH BRANCH & OPEN PR
-      # ─────────────────────────────────────────────
+      # ──────────────────────────────────────────────────────────────
+      # 13. SAST — shellcheck (shell scripts if present)
+      # ──────────────────────────────────────────────────────────────
+      - name: SAST — shellcheck
+        if: always()
+        run: |
+          set -euo pipefail
+          COUNT=$(find . -not -path './.git/*' -name '*.sh' \
+                  2>/dev/null | wc -l || echo 0)
+          if [ "${COUNT}" -gt 0 ]; then
+            echo "shellcheck: scanning ${COUNT} script(s)..."
+            find . -not -path './.git/*' -name '*.sh' \
+              -print0 | xargs -0 shellcheck --severity=warning \
+              || echo "::warning::shellcheck found issues (non-blocking)"
+          else
+            echo "No shell scripts found — skipping shellcheck."
+          fi
+
+      # ──────────────────────────────────────────────────────────────
+      # 14. PUSH BRANCH + OPEN PR
+      # ──────────────────────────────────────────────────────────────
       - name: Push branch and open pull request
         if: success()
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN:        ${{ secrets.GITHUB_TOKEN }}
+          TASK:            ${{ github.event.inputs.task }}
+          RUN_ID:          ${{ github.run_id }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
-          # FIX #2 — strict shell mode
           set -euo pipefail
 
-          BRANCH="kawaiiforge/${{ github.run_id }}"
+          DEFAULT=$(git rev-parse --abbrev-ref origin/HEAD \
+                    2>/dev/null | sed 's|origin/||' || echo "main")
+          BRANCH="omniforge/${RUN_ID}"
+          AHEAD=$(git rev-list --count "origin/${DEFAULT}..HEAD")
+
           git push -u origin "${BRANCH}"
 
-          TASK_SHORT=$(printf '%s' \
-            "${{ github.event.inputs.task_description }}" \
-            | head -c 80)
+          # Write PR body via Python — safe against backticks, $, quotes
+          # in TASK that would break shell argument parsing.
+          BODY_FILE=$(mktemp /tmp/pr-body-XXXXXX.md)
+          python3 - << 'PYEOF'
+          import os, json
 
-          # FIX #12 — write PR body to a temp file so that backticks,
-          # quotes, or dollar signs in task_description cannot break
-          # the gh pr create argument parsing.
-          PR_BODY_FILE=$(mktemp)
-          cat > "${PR_BODY_FILE}" << PRBODY_EOF
-          ## 🌸 KawaiiForge Autonomous Build Report
+          run_id = os.environ["RUN_ID"]
+          task   = os.environ["TASK"]
+          server = os.environ["GITHUB_SERVER_URL"]
+          repo   = os.environ["GITHUB_REPOSITORY"]
+          ahead  = os.environ["AHEAD"]
+          title  = task[:72] + ("…" if len(task) > 72 else "")
+
+          body = f"""## 🤖 OmniForge Autonomous Build Report
 
           | Field | Value |
-          |-------|-------|
-          | **Status** | ✅ Fully autonomous completion |
-          | **Agent** | opencode-ai (non-interactive \`run\` mode) |
-          | **Model** | \`inclusionai/ling-2.6-1t\` via Novita AI |
-          | **MCP** | \`@playwright/mcp\` (Chromium) + \`mcp-server-fetch\` |
-          | **Instructions** | \`AGENTS.md\` + \`KAWAII_PROMPT.md\` |
-          | **Validation** | Autonomous fix loop until \`validate.sh\` exits 0 |
-          | **Run** | [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
+          |---|---|
+          | **Status** | ✅ Autonomous completion |
+          | **Agent** | `opencode-ai` — headless `run` mode |
+          | **Model** | `inclusionai/ling-2.6-1t` via Novita AI |
+          | **MCP** | Playwright (Chromium) + mcp-server-fetch |
+          | **Research** | Live doc verification before every dependency |
+          | **Commits** | {ahead} beyond bootstrap |
+          | **Validation** | `validate.sh` exits 0 ✅ |
+          | **Run** | [{run_id}]({server}/{repo}/actions/runs/{run_id}) |
 
           ### Task
-          \`\`\`
-          ${{ github.event.inputs.task_description }}
-          \`\`\`
+          ```
+          {task}
+          ```
 
           ---
-          Built with ❤️ by KawaiiForge — powerful software, adorable delivery 🌸
-          PRBODY_EOF
+          *Built entirely autonomously by OmniForge — zero human intervention* 🤖✨
+          """
+
+          with open(os.environ["BODY_FILE"], "w") as f:
+              f.write(body)
+          print(f"PR body written ({len(body)} chars)")
+          PYEOF
+
+          TASK_SHORT=$(printf '%s' "${TASK}" | head -c 72)
 
           gh pr create \
-            --title "🌸 KawaiiForge: ${TASK_SHORT}…" \
-            --body-file "${PR_BODY_FILE}" \
-            --base main \
-            --head "${BRANCH}"
+            --title "🤖 OmniForge: ${TASK_SHORT}…" \
+            --body-file "${BODY_FILE}" \
+            --base  "${DEFAULT}" \
+            --head  "${BRANCH}"
 
-          rm -f "${PR_BODY_FILE}"
+          rm -f "${BODY_FILE}"
+          echo "✅ PR opened against ${DEFAULT}"
