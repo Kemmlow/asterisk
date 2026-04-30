@@ -1,22 +1,21 @@
 import os
 import json
 import asyncio
-from openai import OpenAI
+from openai import AsyncOpenAI
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-# Load PROMPT.md (Your system instructions)
 with open("PROMPT.md", "r") as f:
     SYSTEM_PROMPT = f.read()
 
 USER_TASK = os.getenv("AGENT_TASK", "Execute default objective.")
 
-client = OpenAI(
+# Fix 1: Use AsyncOpenAI instead of OpenAI
+client = AsyncOpenAI(
     api_key=os.getenv("NOVITA_API_KEY"),
-    base_url=os.getenv("NOVITA_BASE_URL")
+    base_url=os.getenv("NOVITA_BASE_URL", "https://api.novita.ai/openai")
 )
 
-# Updated for the 2026 @playwright/mcp package
 mcp_params = StdioServerParameters(
     command="npx",
     args=["-y", "@playwright/mcp@latest", "--headless"],
@@ -45,7 +44,8 @@ async def run_agent():
             print(f"--- Starting Task: {USER_TASK} ---")
 
             while True:
-                response = client.chat.completions.create(
+                # Fix 2: Await the model call so the MCP pipes don't freeze
+                response = await client.chat.completions.create(
                     model=os.getenv("MODEL_NAME"),
                     messages=messages,
                     tools=available_tools
