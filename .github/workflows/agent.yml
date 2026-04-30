@@ -33,7 +33,7 @@ jobs:
       - name: Run Agent
         env:
           NOVITA_API_KEY: ${{ secrets.NOVITA_API_KEY }}
-          NOVITA_BASE_URL: "https://api.novita.ai/v1"
+          NOVITA_BASE_URL: "https://api.novita.ai/openai"
           MODEL_NAME: "inclusionai/ling-2.6-1t"
           AGENT_TASK: ${{ github.event.inputs.task }}
         run: python agent_main.py
