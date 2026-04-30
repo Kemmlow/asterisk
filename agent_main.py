@@ -2,90 +2,82 @@ import os
 import json
 import asyncio
 import logging
+import random
 from typing import List, Dict, Any
 from openai import AsyncOpenAI
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 # ==========================================
-# 1. Configuration & Logging
+# 1. Setup & Specialist Personas
 # ==========================================
-
 logging.basicConfig(
     level=logging.INFO,
     format="[%(asctime)s] Asterisk Core [%(levelname)s] %(message)s",
     datefmt="%H:%M:%S"
 )
-logger = logging.getLogger("Asterisk.Kemmlow")
+logger = logging.getLogger("Asterisk")
 
-# Load System Instructions (PROMPT.md)
-PROMPT_FILE = "PROMPT.md"
-try:
-    with open(PROMPT_FILE, "r") as f:
-        SYSTEM_PROMPT = f.read()
-except FileNotFoundError:
-    logger.warning(f"{PROMPT_FILE} not found. Running with empty system prompt.")
-    SYSTEM_PROMPT = "You are a helpful autonomous agent."
+with open("PROMPT.md", "r") as f:
+    BASE_SYSTEM_PROMPT = f.read()
 
 USER_TASK = os.getenv("AGENT_TASK", "Execute default objective.")
+MODEL = os.getenv("MODEL_NAME", "inclusionai/ling-2.6-1t")
 
-# API Configuration
 client = AsyncOpenAI(
     api_key=os.getenv("NOVITA_API_KEY"),
     base_url=os.getenv("NOVITA_BASE_URL", "https://api.novita.ai/openai")
 )
 
-# MCP Server Configuration (Playwright)
-mcp_params = StdioServerParameters(
-    command="npx",
-    args=["-y", "@playwright/mcp@latest", "--headless"],
-)
+# Independent specialist logic
+PERSONAS = [
+    "Focus on high-speed efficiency and code optimization.",
+    "Focus on extreme security, error handling, and stability.",
+    "Focus on innovative UX and aesthetic brilliance.",
+    "Think like a skeptic: find flaws and edge-cases in the logic."
+]
 
 # ==========================================
-# 2. Parallel-Capable Tool Wrapper
+# 2. Smart Rate-Limit Helpers
 # ==========================================
+async def smart_delay():
+    """Adds jitter to bypass RPM rate-limiters."""
+    delay = random.uniform(2.0, 4.0)
+    await asyncio.sleep(delay)
 
-async def execute_tool(session: ClientSession, tool_call: Any) -> Dict[str, Any]:
-    """
-    Executes a single tool call asynchronously. 
-    Catches errors locally to prevent a single bad scrape from crashing the agent.
-    """
-    tool_name = tool_call.function.name
-    logger.info(f"Triggering tool: {tool_name}")
+async def get_specialist_view(persona_mod: str, task: str) -> str:
+    """Individual agent reasoning without seeing other agents' thoughts."""
+    await smart_delay() # Staggered start
+    logger.info(f"Specialist starting reasoning: {persona_mod[:30]}...")
     
-    try:
-        arguments = json.loads(tool_call.function.arguments)
-        result = await session.call_tool(tool_name, arguments)
-        
-        return {
-            "role": "tool",
-            "tool_call_id": tool_call.id,
-            "name": tool_name,
-            "content": str(result.content)
-        }
-        
-    except Exception as e:
-        logger.error(f"Execution failed for {tool_name}: {str(e)}")
-        # Feed error back to the model for self-correction
-        return {
-            "role": "tool",
-            "tool_call_id": tool_call.id,
-            "name": tool_name,
-            "content": f"Error: {str(e)}"
-        }
+    resp = await client.chat.completions.create(
+        model=MODEL,
+        messages=[
+            {"role": "system", "content": f"{BASE_SYSTEM_PROMPT}\n\nConstraint: {persona_mod}"},
+            {"role": "user", "content": f"Think deeply and provide a technical strategy for: {task}"}
+        ]
+    )
+    return resp.choices[0].message.content
 
 # ==========================================
-# 3. Main Autonomous Loop
+# 3. Main Multi-Agent Loop (V1 Base)
 # ==========================================
+async def run_agent():
+    # --- PHASE 1: Parallel Specialist Reasoning ---
+    logger.info("Spawning Parallel Council (4 Agents)...")
+    tasks = [get_specialist_view(p, USER_TASK) for p in PERSONAS]
+    specialist_reports = await asyncio.gather(*tasks)
+    
+    council_context = "\n\n".join([f"--- Report {i+1} ---\n{r}" for i, r in enumerate(specialist_reports)])
+    logger.info("Council reports gathered. Initializing Playwright...")
 
-async def run_agent() -> None:
-    logger.info("Initializing Playwright MCP...")
+    # --- PHASE 2: Main Autonomous Execution (V1 Loop) ---
+    mcp_params = StdioServerParameters(command="npx", args=["-y", "@playwright/mcp@latest", "--headless"])
     
     async with stdio_client(mcp_params) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
             
-            # Map discovered tools to OpenAI/Novita format
             discovered = await session.list_tools()
             available_tools = [{
                 "type": "function",
@@ -95,53 +87,48 @@ async def run_agent() -> None:
                     "parameters": t.inputSchema
                 }
             } for t in discovered.tools]
-            
-            logger.info(f"System ready with {len(available_tools)} tools.")
 
-            messages: List[Dict[str, Any]] = [
-                {"role": "system", "content": SYSTEM_PROMPT},
+            # The Lead Agent receives all the council's wisdom at once
+            messages = [
+                {"role": "system", "content": f"{BASE_SYSTEM_PROMPT}\n\nYou are the LEAD AGENT. Review these 4 specialist strategies and execute the best plan using your tools.\n\nCOUNCIL STRATEGIES:\n{council_context}"},
                 {"role": "user", "content": USER_TASK}
             ]
-
-            logger.info(f"Task Started: {USER_TASK}")
 
             iteration = 0
             while True:
                 iteration += 1
-                logger.info(f"Thinking... (Loop {iteration})")
+                await smart_delay() # Prevent loop-based rate limiting
                 
-                try:
-                    response = await client.chat.completions.create(
-                        model=os.getenv("MODEL_NAME", "inclusionai/ling-2.6-1t"),
-                        messages=messages,
-                        tools=available_tools
-                    )
-                except Exception as e:
-                    logger.critical(f"API Failure: {str(e)}")
-                    break
+                logger.info(f"Thinking... (Loop {iteration})")
+                response = await client.chat.completions.create(
+                    model=MODEL,
+                    messages=messages,
+                    tools=available_tools
+                )
 
                 choice = response.choices[0].message
                 messages.append(choice)
 
-                # If no tool calls are present, the agent has finished its work
                 if not choice.tool_calls:
-                    logger.info("Task concluded successfully.")
+                    logger.info("Task concluded.")
                     print(f"\n[FINAL RESPONSE]:\n{choice.content}")
                     break
 
-                # PARALLEL EXECUTION: Launch all requested tool calls at once
-                logger.info(f"Processing {len(choice.tool_calls)} concurrent actions...")
-                tasks = [execute_tool(session, tool_call) for tool_call in choice.tool_calls]
-                tool_results = await asyncio.gather(*tasks)
+                # Support for Parallel Tool Exec (from the previous working patch)
+                logger.info(f"Executing {len(choice.tool_calls)} concurrent tool actions...")
+                tool_tasks = []
+                for tool_call in choice.tool_calls:
+                    async def call_t(tc):
+                        res = await session.call_tool(tc.function.name, json.loads(tc.function.arguments))
+                        return {"role": "tool", "tool_call_id": tc.id, "name": tc.function.name, "content": str(res.content)}
+                    tool_tasks.append(call_t(tool_call))
                 
-                # Append all results to context for the next iteration
-                messages.extend(tool_results)
+                results = await asyncio.gather(*tool_tasks)
+                messages.extend(results)
 
 if __name__ == "__main__":
     try:
         asyncio.run(run_agent())
-    except KeyboardInterrupt:
-        logger.info("Interrupted by user.")
     except Exception as e:
-        logger.critical(f"Unrecoverable error: {str(e)}")
+        logger.critical(f"Fatal Engine Failure: {e}")
         
