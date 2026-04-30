@@ -1,11 +1,11 @@
-name: OPENHANDS-MCP-PROD
+name: OPENHANDS-PROD-SUCCESS
 on:
   workflow_dispatch:
     inputs:
       task:
-        description: 'Mission Objective'
+        description: 'Mission'
         required: true
-        default: 'Audit this repo and create a summary PR.'
+        default: 'Build the Flask converter app per PROMPT.md'
 
 jobs:
   execute:
@@ -17,20 +17,26 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
       
-      - name: Install uv & Tools
+      - name: Setup Environment
         run: |
+          # Install uv
           curl -LsSf https://astral.sh/uv/install.sh | sh
-          npm install -g @playwright/mcp @modelcontextprotocol/server-github @modelcontextprotocol/server-filesystem mcp-shell-server
-          npx playwright install --with-deps chromium
+          # Create and activate Virtual Environment
+          uv venv .venv
+          echo "VIRTUAL_ENV=.venv" >> $GITHUB_ENV
+          echo "$GITHUB_WORKSPACE/.venv/bin" >> $GITHUB_PATH
+
+      - name: Install Dependencies
+        run: |
+          uv pip install openhands-sdk openhands-tools
 
       - name: Run Agent
         env:
           LLM_API_KEY: ${{ secrets.NOVITA_API_KEY }}
           LLM_BASE_URL: "https://api.novita.ai/openai"
-          LLM_MODEL: "novita/${{ vars.MODEL_NAME }}"
+          # Handles blank vars gracefully
+          LLM_MODEL: "novita/${{ vars.MODEL_NAME || 'ling-2.6-1t' }}"
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           AGENT_TASK: ${{ github.event.inputs.task }}
-        run: |
-          # Use --break-system-packages to override the PEP 668 protection in CI
-          uv pip install --system --break-system-packages openhands-sdk openhands-tools mcp
-          python agent_main.py
+        run: python agent_main.py
+        
