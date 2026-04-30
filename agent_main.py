@@ -5,21 +5,21 @@ from openai import OpenAI
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-# 1. Load your PROMPT.md (Untouched)
+# Load PROMPT.md (Your system instructions)
 with open("PROMPT.md", "r") as f:
-    SYSTEM_INSTRUCTIONS = f.read()
+    SYSTEM_PROMPT = f.read()
 
-# 2. Get the task from the Workflow input
-USER_TASK = os.getenv("AGENT_TASK", "No task provided.")
+USER_TASK = os.getenv("AGENT_TASK", "Execute default objective.")
 
 client = OpenAI(
     api_key=os.getenv("NOVITA_API_KEY"),
     base_url=os.getenv("NOVITA_BASE_URL")
 )
 
+# Updated for the 2026 @playwright/mcp package
 mcp_params = StdioServerParameters(
     command="npx",
-    args=["-y", "@modelcontextprotocol/server-playwright"],
+    args=["-y", "@playwright/mcp@latest", "--headless"],
 )
 
 async def run_agent():
@@ -27,7 +27,6 @@ async def run_agent():
         async with ClientSession(read, write) as session:
             await session.initialize()
             
-            # Auto-map Playwright tools to OpenAI function format
             discovered = await session.list_tools()
             available_tools = [{
                 "type": "function",
@@ -38,11 +37,12 @@ async def run_agent():
                 }
             } for t in discovered.tools]
 
-            # The system prompt is your PROMPT.md
             messages = [
-                {"role": "system", "content": SYSTEM_INSTRUCTIONS},
+                {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": USER_TASK}
             ]
+
+            print(f"--- Starting Task: {USER_TASK} ---")
 
             while True:
                 response = client.chat.completions.create(
@@ -55,11 +55,11 @@ async def run_agent():
                 messages.append(choice)
 
                 if not choice.tool_calls:
-                    print(f"\n[FINAL RESPONSE]:\n{choice.content}")
+                    print(f"\n[DONE]: {choice.content}")
                     break
 
                 for tool_call in choice.tool_calls:
-                    print(f"[EXECUTING]: {tool_call.function.name}")
+                    print(f"[TOOL]: {tool_call.function.name}")
                     
                     result = await session.call_tool(
                         tool_call.function.name, 
@@ -75,4 +75,3 @@ async def run_agent():
 
 if __name__ == "__main__":
     asyncio.run(run_agent())
-    
