@@ -1,40 +1,34 @@
-name: Ling-1T Autonomous Agent
+name: ASTERISK-V4.1 Autonomous Cycle
 on:
   workflow_dispatch:
     inputs:
       task:
-        description: 'Goal for the agent'
+        description: 'Goal'
         required: true
-        default: 'Research the latest benchmarks for Ling-2.6-1T.'
+        default: 'Refactor the agent_main.py logic and create a PR.'
 
 jobs:
   run-agent:
     runs-on: ubuntu-latest
-    timeout-minutes: 240
-    
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node & Python
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '20'}
       - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
+        with: {python-version: '3.11'}
 
-      - name: Install Dependencies
+      - name: Install
         run: |
-          pip install -r requirements.txt
-          npm install -g @playwright/mcp@latest
+          pip install openai mcp-python-client python-dotenv
           npx playwright install --with-deps chromium
 
-      - name: Run Agent
+      - name: Execute
         env:
           NOVITA_API_KEY: ${{ secrets.NOVITA_API_KEY }}
-          NOVITA_BASE_URL: "https://api.novita.ai/openai"
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MODEL_NAME: "inclusionai/ling-2.6-1t"
           AGENT_TASK: ${{ github.event.inputs.task }}
         run: python agent_main.py
-        
