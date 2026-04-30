@@ -1,11 +1,11 @@
-name: OPENHANDS-PROD-SDK
+name: OPENHANDS-MCP-PROD
 on:
   workflow_dispatch:
     inputs:
       task:
         description: 'Mission Objective'
         required: true
-        default: 'Refactor the project and fix any found issues.'
+        default: 'Audit this repo and create a summary PR.'
 
 jobs:
   execute:
@@ -17,10 +17,13 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
       
-      - name: Install uv
-        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+      - name: Install uv & Tools
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          npm install -g @playwright/mcp @modelcontextprotocol/server-github @modelcontextprotocol/server-filesystem mcp-shell-server
+          npx playwright install --with-deps chromium
 
-      - name: Setup Environment & Run Agent
+      - name: Run Agent
         env:
           LLM_API_KEY: ${{ secrets.NOVITA_API_KEY }}
           LLM_BASE_URL: "https://api.novita.ai/openai"
@@ -28,8 +31,5 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           AGENT_TASK: ${{ github.event.inputs.task }}
         run: |
-          # Install SDK components
-          uv pip install --system openhands-sdk openhands-tools openhands-workspace
-          
-          # Run the production controller
+          uv pip install --system openhands-sdk openhands-tools
           python agent_main.py

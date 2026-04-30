@@ -1,50 +1,46 @@
 import os
+import asyncio
 from openhands.sdk import LLM, Agent, Conversation, Tool
 from openhands.tools.terminal import TerminalTool
 from openhands.tools.file_editor import FileEditorTool
-from openhands.tools.task_tracker import TaskTrackerTool
+from openhands.tools.mcp import McpTool
 
-# 1. Load System Prompt from PROMPT.md
-def get_custom_instructions():
-    if os.path.exists("PROMPT.md"):
-        with open("PROMPT.md", "r") as f:
-            return f.read()
-    return "Execute the task autonomously."
+async def run_mission():
+    # 1. Setup LLM
+    llm = LLM(
+        model=os.getenv("LLM_MODEL"),
+        api_key=os.getenv("LLM_API_KEY"),
+        base_url=os.getenv("LLM_BASE_URL"),
+    )
 
-# 2. Configure the LLM (Novita/Ling/DeepSeek)
-llm = LLM(
-    model=os.getenv("LLM_MODEL"),
-    api_key=os.getenv("LLM_API_KEY"),
-    base_url=os.getenv("LLM_BASE_URL"),
-)
+    # 2. Configure MCP Tools (Maker's Choice)
+    # We use stdio to communicate with the globally installed npm packages
+    mcp_tools = [
+        McpTool(name="browser", command="npx", args=["-y", "@playwright/mcp@latest", "--headless"]),
+        McpTool(name="github", command="npx", args=["-y", "@modelcontextprotocol/server-github"], 
+                env={"GITHUB_PERSONAL_ACCESS_TOKEN": os.getenv("GITHUB_TOKEN")}),
+        McpTool(name="filesystem", command="npx", args=["-y", "@modelcontextprotocol/server-filesystem", os.getcwd()])
+    ]
 
-# 3. Initialize Agent with Prod Tools
-# Note: OpenHands SDK handles the MCP-like logic for these tools internally
-agent = Agent(
-    llm=llm,
-    system_prompt=get_custom_instructions(),
-    tools=[
-        Tool(name=TerminalTool.name),    # For shell commands
-        Tool(name=FileEditorTool.name),  # For fixing code
-        Tool(name=TaskTrackerTool.name), # For keeping the state
-    ],
-)
+    # 3. Initialize Agent with Built-in + MCP Tools
+    agent = Agent(
+        llm=llm,
+        system_prompt=open("PROMPT.md").read() if os.path.exists("PROMPT.md") else "Handle task.",
+        tools=[
+            Tool(name=TerminalTool.name),    # The raw shell
+            Tool(name=FileEditorTool.name),  # Specialized for high-precision edits
+            *mcp_tools                      # Your 4 cherry-picked MCPs
+        ],
+    )
 
-# 4. Run the Conversation
-def main():
-    task = os.getenv("AGENT_TASK", "Audit the repository.")
-    workspace_path = os.getcwd()
+    # 4. Start the Managed Conversation
+    task = os.getenv("AGENT_TASK", "Execute audit.")
+    conversation = Conversation(agent=agent, workspace=os.getcwd())
     
-    print(f"🚀 Mission Start: {task}")
-    
-    conversation = Conversation(agent=agent, workspace=workspace_path)
-    conversation.send_message(task)
-    
-    # This runs the autonomous loop (Action-Observation-Reflection)
-    # It replaces your manual while-loop and handles "stuck" states
-    conversation.run()
-    
+    print(f"🚀 Launching OpenHands with MCP integration...")
+    await conversation.send_message_async(task)
+    await conversation.run_async()
     print("🏁 Mission Complete.")
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(run_mission())
