@@ -61,12 +61,13 @@ class ReasoningHarness:
 # 3. Execution & MCP Bridge
 # ==========================================
 async def run_agent():
+    # Phase 1 & 2: Planning
     reports = await asyncio.gather(*[get_specialist_reasoning(p, USER_TASK) for p in UNIVERSAL_PERSONAS])
     blueprint = await ReasoningHarness.synthesize(USER_TASK, "\n\n".join(reports))
 
-    # Path fix: Ensure current working directory is explicitly passed
     cwd = os.getcwd()
 
+    # Robust MCP Configuration
     mcp_configs = {
         "browser": StdioServerParameters(command="npx", args=["-y", "@playwright/mcp@latest", "--headless"], env=os.environ),
         "git": StdioServerParameters(command="npx", args=["-y", "@modelcontextprotocol/server-github"], 
@@ -83,6 +84,7 @@ async def run_agent():
         sessions = [ClientSession(b_r, b_w), ClientSession(g_r, g_w), ClientSession(f_r, f_w), ClientSession(s_r, s_w)]
         await asyncio.gather(*(s.initialize() for s in sessions))
 
+        # Tool Mapping
         tool_map = {}
         available_tools = []
         for sess in sessions:
@@ -116,4 +118,4 @@ async def run_agent():
                     messages.append({"role": "tool", "tool_call_id": tc.id, "name": tc.function.name, "content": f"Error: {e}"})
 
 if __name__ == "__main__":
-    async asyncio.run(run_agent())
+    asyncio.run(run_agent())
