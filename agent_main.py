@@ -2,7 +2,7 @@ import os
 import json
 import asyncio
 import logging
-from typing import List, Dict, Any
+from contextlib import AsyncExitStack
 from openai import AsyncOpenAI
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -17,7 +17,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("Asterisk")
 
-USER_TASK = os.getenv("AGENT_TASK", "Refactor the codebase for performance.")
+USER_TASK = os.getenv("AGENT_TASK", "List the files in the current directory and check git status.")
 MODEL = os.getenv("MODEL_NAME", "inclusionai/ling-2.6-1t")
 
 client = AsyncOpenAI(
@@ -26,10 +26,10 @@ client = AsyncOpenAI(
 )
 
 UNIVERSAL_PERSONAS = [
-    "LOGIC: Senior Architect. Focus on Big O complexity, type safety, and memory management.",
-    "CREATIVE: Polyglot Developer. Focus on design patterns (Functional, OOP) and clean abstractions.",
-    "SKEPTICAL: Security/QA Lead. Focus on race conditions, edge cases, and technical debt.",
-    "PRAGMATIC: DevOps/SRE. Focus on build stability, CI/CD compatibility, and local execution."
+    "LOGIC: Senior Architect. Focus on Big O complexity and memory management.",
+    "CREATIVE: Polyglot Developer. Focus on design patterns and clean abstractions.",
+    "SKEPTICAL: Security/QA Lead. Focus on race conditions and edge cases.",
+    "PRAGMATIC: DevOps/SRE. Focus on build stability and CI/CD compatibility."
 ]
 
 # ==========================================
@@ -58,47 +58,67 @@ class ReasoningHarness:
         return resp.choices[0].message.content
 
 # ==========================================
-# 3. Execution & MCP Bridge
+# 3. Execution & MCP Bridge (The Fix)
 # ==========================================
 async def run_agent():
     # Phase 1 & 2: Planning
     reports = await asyncio.gather(*[get_specialist_reasoning(p, USER_TASK) for p in UNIVERSAL_PERSONAS])
     blueprint = await ReasoningHarness.synthesize(USER_TASK, "\n\n".join(reports))
 
-    cwd = os.getcwd()
+    logger.info("Starting up MCP Bridge...")
+    
+    # Environment Setup
+    env = os.environ.copy()
+    if "GITHUB_TOKEN" in env and "GITHUB_PERSONAL_ACCESS_TOKEN" not in env:
+        env["GITHUB_PERSONAL_ACCESS_TOKEN"] = env["GITHUB_TOKEN"]
 
-    # Robust MCP Configuration
+    # Absolute path prevents ENOENT crashes on the filesystem server
+    current_dir = os.path.abspath(".")
+    
+    # The 4 Cherry-Picked Maker Tools
     mcp_configs = {
-        "browser": StdioServerParameters(command="npx", args=["-y", "@playwright/mcp@latest", "--headless"], env=os.environ),
-        "git": StdioServerParameters(command="npx", args=["-y", "@modelcontextprotocol/server-github"], 
-                                    env={**os.environ, "GITHUB_PERSONAL_ACCESS_TOKEN": os.getenv("GITHUB_TOKEN")}),
-        "fs": StdioServerParameters(command="npx", args=["-y", "@modelcontextprotocol/server-filesystem", cwd], env=os.environ),
-        "shell": StdioServerParameters(command="npx", args=["-y", "mcp-shell-server"], env=os.environ)
+        "browser": StdioServerParameters(command="npx", args=["-y", "@playwright/mcp@latest", "--headless"], env=env),
+        "git": StdioServerParameters(command="npx", args=["-y", "@modelcontextprotocol/server-github"], env=env),
+        "fs": StdioServerParameters(command="npx", args=["-y", "@modelcontextprotocol/server-filesystem", current_dir], env=env),
+        "shell": StdioServerParameters(command="npx", args=["-y", "mcp-shell-server"], env=env)
     }
 
-    async with stdio_client(mcp_configs["browser"]) as (b_r, b_w), \
-               stdio_client(mcp_configs["git"]) as (g_r, g_w), \
-               stdio_client(mcp_configs["fs"]) as (f_r, f_w), \
-               stdio_client(mcp_configs["shell"]) as (s_r, s_w):
-        
-        sessions = [ClientSession(b_r, b_w), ClientSession(g_r, g_w), ClientSession(f_r, f_w), ClientSession(s_r, s_w)]
-        await asyncio.gather(*(s.initialize() for s in sessions))
-
-        # Tool Mapping
+    # AsyncExitStack prevents deadlocks by initializing sequentially
+    async with AsyncExitStack() as stack:
         tool_map = {}
         available_tools = []
-        for sess in sessions:
-            mcp_tools = await sess.list_tools()
-            for t in mcp_tools.tools:
-                tool_map[t.name] = sess
-                available_tools.append({"type": "function", "function": {"name": t.name, "description": t.description, "parameters": t.inputSchema}})
+
+        for name, config in mcp_configs.items():
+            logger.info(f"Initializing {name} server...")
+            try:
+                stdio_transport = await stack.enter_async_context(stdio_client(config))
+                read_stream, write_stream = stdio_transport
+                
+                session = await stack.enter_async_context(ClientSession(read_stream, write_stream))
+                await session.initialize()
+                
+                tools_response = await session.list_tools()
+                for t in tools_response.tools:
+                    tool_map[t.name] = session
+                    available_tools.append({
+                        "type": "function", 
+                        "function": {"name": t.name, "description": t.description, "parameters": t.inputSchema}
+                    })
+                logger.info(f"✅ [{name}] online with {len(tools_response.tools)} tools.")
+            except Exception as e:
+                logger.error(f"❌ Failed to start [{name}]: {e}")
+
+        if not available_tools:
+            logger.critical("No tools loaded! Exiting to prevent infinite loop.")
+            return
 
         messages = [
-            {"role": "system", "content": "You are the Lead Production Engine. Execute the blueprint. Use local shell for testing."},
+            {"role": "system", "content": "You are the Lead Production Engine. Execute the blueprint using the provided tools. Output brief status updates."},
             {"role": "assistant", "content": f"BLUEPRINT: {blueprint}"},
             {"role": "user", "content": USER_TASK}
         ]
 
+        logger.info("Entering Main Execution Loop...")
         while True:
             response = await client.chat.completions.create(model=MODEL, messages=messages, tools=available_tools, temperature=0.5)
             msg = response.choices[0].message
@@ -109,13 +129,26 @@ async def run_agent():
                 break
 
             for tc in msg.tool_calls:
-                logger.info(f"Tool Call: {tc.function.name}")
+                logger.info(f"🔧 Tool Call: {tc.function.name}")
                 target = tool_map.get(tc.function.name)
+                
+                if not target:
+                    messages.append({"role": "tool", "tool_call_id": tc.id, "name": tc.function.name, "content": "Error: Tool not found."})
+                    continue
+
                 try:
-                    res = await target.call_tool(tc.function.name, json.loads(tc.function.arguments))
-                    messages.append({"role": "tool", "tool_call_id": tc.id, "name": tc.function.name, "content": str(res.content)})
+                    args = json.loads(tc.function.arguments)
+                    res = await target.call_tool(tc.function.name, args)
+                    
+                    # Robust parsing of MCP text content blocks
+                    result_text = "\n".join([c.text for c in res.content if hasattr(c, 'text')])
+                    messages.append({"role": "tool", "tool_call_id": tc.id, "name": tc.function.name, "content": result_text or "Success"})
                 except Exception as e:
+                    logger.error(f"Execution Error in {tc.function.name}: {e}")
                     messages.append({"role": "tool", "tool_call_id": tc.id, "name": tc.function.name, "content": f"Error: {e}"})
 
 if __name__ == "__main__":
-    asyncio.run(run_agent())
+    try:
+        asyncio.run(run_agent())
+    except KeyboardInterrupt:
+        print("\nAgent stopped.")

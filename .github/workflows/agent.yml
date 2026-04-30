@@ -14,29 +14,30 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Code
+        uses: actions/checkout@v4
       
-      - name: Setup Node.js
+      - name: Setup Node.js (For MCP Servers)
         uses: actions/setup-node@v4
         with:
           node-version: '20'
           
-      - name: Setup Python
+      - name: Setup Python (For Lead Engine)
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Install & Pre-Warm Tools
+      - name: Install Dependencies & Pre-Warm MCP
         run: |
-          # 1. Upgrade Python environment
-          python -m pip install --upgrade pip
+          # 1. Quietly upgrade pip
+          python -m pip install --upgrade pip --quiet
           pip install openai mcp-python-client python-dotenv
           
-          # 2. Pre-install MCP servers globally 
-          # This ensures npx finds them instantly without running them/crashing.
+          # 2. Globally install the 4 Maker's Choice MCP servers
+          # This prevents npx from hanging and asking "Proceed to download? (y/n)"
           npm install -g @playwright/mcp @modelcontextprotocol/server-github @modelcontextprotocol/server-filesystem mcp-shell-server
           
-          # 3. Setup Playwright browsers
+          # 3. Install Playwright browser binaries for the web-scraper
           npx playwright install --with-deps chromium
 
       - name: Execute Production Cycle
