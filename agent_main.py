@@ -9,11 +9,11 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 # ==========================================
-# 1. Setup & Specialist Personas
+# 1. Configuration & Universal Personas
 # ==========================================
 logging.basicConfig(
     level=logging.INFO,
-    format="[%(asctime)s] Asterisk Core [%(levelname)s] %(message)s",
+    format="[%(asctime)s] Asterisk V2.6 [%(levelname)s] %(message)s",
     datefmt="%H:%M:%S"
 )
 logger = logging.getLogger("Asterisk")
@@ -29,55 +29,59 @@ client = AsyncOpenAI(
     base_url=os.getenv("NOVITA_BASE_URL", "https://api.novita.ai/openai")
 )
 
-# Independent specialist logic
-PERSONAS = [
-    "Focus on high-speed efficiency and code optimization.",
-    "Focus on extreme security, error handling, and stability.",
-    "Focus on innovative UX and aesthetic brilliance.",
-    "Think like a skeptic: find flaws and edge-cases in the logic."
+# These cover 100% of all possible problem-solving domains
+UNIVERSAL_PERSONAS = [
+    "LOGIC & STRUCTURE: Deconstruct the task into a rigid, logical hierarchy. Focus on sequence and foundational rules.",
+    "CREATIVE & ALTERNATIVE: Explore unconventional paths, elegant shortcuts, and innovative perspectives.",
+    "CRITICAL & SKEPTICAL: Identify all potential failure points, technical debt, security risks, and logical gaps.",
+    "PRAGMATIC & TECHNICAL: Focus on high-fidelity execution, specific syntax/tools, and real-world efficiency."
 ]
 
 # ==========================================
-# 2. Smart Rate-Limit Helpers
+# 2. Smart Rate-Limit Engine
 # ==========================================
-async def smart_delay():
-    """Adds jitter to bypass RPM rate-limiters."""
-    delay = random.uniform(2.0, 4.0)
-    await asyncio.sleep(delay)
+async def smart_delay(min_sec=2.0, max_sec=4.0):
+    """Jitter delay to bypass Novita RPM filters."""
+    await asyncio.sleep(random.uniform(min_sec, max_sec))
 
-async def get_specialist_view(persona_mod: str, task: str) -> str:
-    """Individual agent reasoning without seeing other agents' thoughts."""
-    await smart_delay() # Staggered start
-    logger.info(f"Specialist starting reasoning: {persona_mod[:30]}...")
+async def get_specialist_reasoning(persona_desc: str, task: str) -> str:
+    """Independent reasoning without inter-agent context interference."""
+    await smart_delay(1.0, 5.0) # Heavy jitter for initial fan-out
+    logger.info(f"Specialist starting reasoning: {persona_desc.split(':')[0]}")
     
-    resp = await client.chat.completions.create(
-        model=MODEL,
-        messages=[
-            {"role": "system", "content": f"{BASE_SYSTEM_PROMPT}\n\nConstraint: {persona_mod}"},
-            {"role": "user", "content": f"Think deeply and provide a technical strategy for: {task}"}
-        ]
-    )
-    return resp.choices[0].message.content
+    try:
+        resp = await client.chat.completions.create(
+            model=MODEL,
+            messages=[
+                {"role": "system", "content": f"{BASE_SYSTEM_PROMPT}\n\nREASONING LENS: {persona_desc}\nProvide a deep-reasoned strategic report for the task."},
+                {"role": "user", "content": task}
+            ]
+        )
+        return f"### {persona_desc.split(':')[0]} REPORT\n{resp.choices[0].message.content}"
+    except Exception as e:
+        logger.error(f"Specialist Reasoning Failed: {e}")
+        return f"### {persona_desc.split(':')[0]} ERROR: Reasoning could not be completed."
 
 # ==========================================
-# 3. Main Multi-Agent Loop (V1 Base)
+# 3. Main Multi-Agent Loop
 # ==========================================
 async def run_agent():
-    # --- PHASE 1: Parallel Specialist Reasoning ---
-    logger.info("Spawning Parallel Council (4 Agents)...")
-    tasks = [get_specialist_view(p, USER_TASK) for p in PERSONAS]
-    specialist_reports = await asyncio.gather(*tasks)
+    # --- PHASE 1: Parallel Fan-Out (Deep Reasoning) ---
+    logger.info("Spawning Universal Council (4-Agent Fan-Out)...")
+    tasks = [get_specialist_reasoning(p, USER_TASK) for p in UNIVERSAL_PERSONAS]
+    reports = await asyncio.gather(*tasks)
     
-    council_context = "\n\n".join([f"--- Report {i+1} ---\n{r}" for i, r in enumerate(specialist_reports)])
-    logger.info("Council reports gathered. Initializing Playwright...")
+    council_context = "\n\n".join(reports)
+    logger.info("Council reports synthesized. Initializing MCP...")
 
-    # --- PHASE 2: Main Autonomous Execution (V1 Loop) ---
+    # --- PHASE 2: Main Autonomous Execution ---
     mcp_params = StdioServerParameters(command="npx", args=["-y", "@playwright/mcp@latest", "--headless"])
     
     async with stdio_client(mcp_params) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
             
+            # Auto-discover tools
             discovered = await session.list_tools()
             available_tools = [{
                 "type": "function",
@@ -88,18 +92,15 @@ async def run_agent():
                 }
             } for t in discovered.tools]
 
-            # The Lead Agent receives all the council's wisdom at once
             messages = [
-                {"role": "system", "content": f"{BASE_SYSTEM_PROMPT}\n\nYou are the LEAD AGENT. Review these 4 specialist strategies and execute the best plan using your tools.\n\nCOUNCIL STRATEGIES:\n{council_context}"},
+                {"role": "system", "content": f"{BASE_SYSTEM_PROMPT}\n\nYou are the LEAD ENGINE. Use the Council's wisdom to achieve the goal.\n\nCOUNCIL REASONING:\n{council_context}"},
                 {"role": "user", "content": USER_TASK}
             ]
 
-            iteration = 0
             while True:
-                iteration += 1
-                await smart_delay() # Prevent loop-based rate limiting
+                await smart_delay(1.5, 3.0) 
+                logger.info("Main Engine Thinking...")
                 
-                logger.info(f"Thinking... (Loop {iteration})")
                 response = await client.chat.completions.create(
                     model=MODEL,
                     messages=messages,
@@ -110,25 +111,26 @@ async def run_agent():
                 messages.append(choice)
 
                 if not choice.tool_calls:
-                    logger.info("Task concluded.")
-                    print(f"\n[FINAL RESPONSE]:\n{choice.content}")
+                    logger.info("Execution complete.")
+                    print(f"\n[FINAL OUTPUT]:\n{choice.content}")
                     break
 
-                # Support for Parallel Tool Exec (from the previous working patch)
-                logger.info(f"Executing {len(choice.tool_calls)} concurrent tool actions...")
-                tool_tasks = []
-                for tool_call in choice.tool_calls:
-                    async def call_t(tc):
+                # PARALLEL TOOL EXECUTION (High Performance)
+                logger.info(f"Executing {len(choice.tool_calls)} tools in parallel...")
+                
+                async def run_tool(tc):
+                    try:
                         res = await session.call_tool(tc.function.name, json.loads(tc.function.arguments))
                         return {"role": "tool", "tool_call_id": tc.id, "name": tc.function.name, "content": str(res.content)}
-                    tool_tasks.append(call_t(tool_call))
-                
-                results = await asyncio.gather(*tool_tasks)
-                messages.extend(results)
+                    except Exception as err:
+                        return {"role": "tool", "tool_call_id": tc.id, "name": tc.function.name, "content": f"Error: {err}"}
+
+                tool_results = await asyncio.gather(*[run_tool(tc) for tc in choice.tool_calls])
+                messages.extend(tool_results)
 
 if __name__ == "__main__":
     try:
         asyncio.run(run_agent())
     except Exception as e:
-        logger.critical(f"Fatal Engine Failure: {e}")
-        
+        logger.critical(f"FATAL: {e}")
+    
