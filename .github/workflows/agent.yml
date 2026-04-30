@@ -16,29 +16,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Setup Environment
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
           
-      - uses: actions/setup-python@v5
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Pre-Warm MCP Cache & Tools
+      - name: Install & Pre-Warm Tools
         run: |
-          # Upgrade pip to stop the notice
+          # 1. Upgrade Python environment
           python -m pip install --upgrade pip
           pip install openai mcp-python-client python-dotenv
           
-          # Warming the cache: we provide '.' as a dummy path for the FS server 
-          # so it doesn't error out during the version check.
-          npx --yes @playwright/mcp@latest --version
-          npx --yes @modelcontextprotocol/server-github --version
-          npx --yes @modelcontextprotocol/server-filesystem . --help
-          npx --yes mcp-shell-server --version
+          # 2. Pre-install MCP servers globally 
+          # This ensures npx finds them instantly without running them/crashing.
+          npm install -g @playwright/mcp @modelcontextprotocol/server-github @modelcontextprotocol/server-filesystem mcp-shell-server
           
-          # Install browser binaries
+          # 3. Setup Playwright browsers
           npx playwright install --with-deps chromium
 
       - name: Execute Production Cycle
