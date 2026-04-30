@@ -1,7 +1,12 @@
 name: Ling-1T Autonomous Agent
 on:
   workflow_dispatch:
-  
+    inputs:
+      task:
+        description: 'What should the agent do?'
+        required: true
+        default: 'Research the latest AI news and summarize.'
+
 jobs:
   run-autonomous-agent:
     runs-on: ubuntu-latest
@@ -34,5 +39,6 @@ jobs:
           NOVITA_API_KEY: ${{ secrets.NOVITA_API_KEY }}
           NOVITA_BASE_URL: "https://api.novita.ai/v1"
           MODEL_NAME: "inclusionai/ling-2.6-1t"
+          AGENT_TASK: ${{ github.event.inputs.task }}
         run: python agent_main.py
         
