@@ -1,14 +1,14 @@
-name: OPENHANDS-PROD-STACK
+name: OPENHANDS-PROD-SDK
 on:
   workflow_dispatch:
     inputs:
       task:
         description: 'Mission Objective'
         required: true
-        default: 'Refactor the project for performance and fix any linting errors.'
+        default: 'Refactor the project and fix any found issues.'
 
 jobs:
-  run-openhands:
+  execute:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -16,22 +16,20 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+      
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
 
-      - name: Run OpenHands Agent
-        uses: all-hands-ai/runtime@v0.1
-        with:
-          args: >
-            --task "${{ github.event.inputs.task }}"
-            --model "novita/${{ vars.MODEL_NAME }}"
-            --api-key "${{ secrets.NOVITA_API_KEY }}"
-            --base-url "https://api.novita.ai/openai"
-            --instruction-file "PROMPT.md"
+      - name: Setup Environment & Run Agent
         env:
+          LLM_API_KEY: ${{ secrets.NOVITA_API_KEY }}
+          LLM_BASE_URL: "https://api.novita.ai/openai"
+          LLM_MODEL: "novita/${{ vars.MODEL_NAME }}"
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SANDBOX_USER_ID: "0"
-          WORKSPACE_MOUNT_PATH: ${{ github.workspace }}
-
-      - name: Audit Output
+          AGENT_TASK: ${{ github.event.inputs.task }}
         run: |
-          git status
-          echo "OpenHands cycle complete."
+          # Install SDK components
+          uv pip install --system openhands-sdk openhands-tools openhands-workspace
+          
+          # Run the production controller
+          python agent_main.py
