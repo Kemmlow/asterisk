@@ -1,11 +1,11 @@
-name: ASTERISK-V4.2.1-FIX
+name: ASTERISK-V4.2.3-ULTRAPROD
 on:
   workflow_dispatch:
     inputs:
       task:
-        description: 'Goal'
+        description: 'Heavy-Duty Objective'
         required: true
-        default: 'Research trillionaire predictions and create a PR with the findings.'
+        default: 'Perform a full security audit of the repository and suggest Rust-based performance optimizations.'
 
 jobs:
   run-agent:
@@ -20,20 +20,17 @@ jobs:
       - uses: actions/setup-python@v5
         with: {python-version: '3.11'}
 
-      - name: Install and Pre-Link MCP
+      - name: Pre-Warm MCP Cache
         run: |
           pip install openai mcp-python-client python-dotenv
-          sudo npm install -g @playwright/mcp@latest mcp-shell-server @modelcontextprotocol/server-github @modelcontextprotocol/server-filesystem
-          
-          # Using -sf (force) to overwrite existing binaries/links and avoid the 'File exists' crash
-          sudo ln -sf $(which mcp-server-github) /usr/local/bin/mcp-server-github
-          sudo ln -sf $(which mcp-server-filesystem) /usr/local/bin/mcp-server-filesystem
-          sudo ln -sf $(which mcp-shell-server) /usr/local/bin/mcp-shell-server
-          sudo ln -sf $(which playwright-mcp) /usr/local/bin/playwright-mcp
-          
+          # Pre-downloading prevents npx from hanging during the Python execution
+          npx --yes @playwright/mcp@latest --version
+          npx --yes @modelcontextprotocol/server-github --version
+          npx --yes @modelcontextprotocol/server-filesystem --version
+          npx --yes mcp-shell-server --version
           npx playwright install --with-deps chromium
 
-      - name: Execute
+      - name: Execute Production Cycle
         env:
           NOVITA_API_KEY: ${{ secrets.NOVITA_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
