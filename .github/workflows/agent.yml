@@ -1,14 +1,14 @@
-name: ASTERISK-V4.2.3-ULTRAPROD
+name: OPENHANDS-PROD-STACK
 on:
   workflow_dispatch:
     inputs:
       task:
-        description: 'Heavy-Duty Objective'
+        description: 'Mission Objective'
         required: true
-        default: 'Perform a full security audit of the repository and suggest Rust-based performance optimizations.'
+        default: 'Refactor the project for performance and fix any linting errors.'
 
 jobs:
-  run-agent:
+  run-openhands:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -16,34 +16,22 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-      
-      - name: Setup Node.js (For MCP Servers)
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          
-      - name: Setup Python (For Lead Engine)
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
 
-      - name: Install Dependencies & Pre-Warm MCP
-        run: |
-          # 1. Quietly upgrade pip
-          python -m pip install --upgrade pip --quiet
-          pip install openai mcp-python-client python-dotenv
-          
-          # 2. Globally install the 4 Maker's Choice MCP servers
-          # This prevents npx from hanging and asking "Proceed to download? (y/n)"
-          npm install -g @playwright/mcp @modelcontextprotocol/server-github @modelcontextprotocol/server-filesystem mcp-shell-server
-          
-          # 3. Install Playwright browser binaries for the web-scraper
-          npx playwright install --with-deps chromium
-
-      - name: Execute Production Cycle
+      - name: Run OpenHands Agent
+        uses: all-hands-ai/runtime@v0.1
+        with:
+          args: >
+            --task "${{ github.event.inputs.task }}"
+            --model "novita/${{ vars.MODEL_NAME }}"
+            --api-key "${{ secrets.NOVITA_API_KEY }}"
+            --base-url "https://api.novita.ai/openai"
+            --instruction-file "PROMPT.md"
         env:
-          NOVITA_API_KEY: ${{ secrets.NOVITA_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          MODEL_NAME: "inclusionai/ling-2.6-1t"
-          AGENT_TASK: ${{ github.event.inputs.task }}
-        run: python agent_main.py
+          SANDBOX_USER_ID: "0"
+          WORKSPACE_MOUNT_PATH: ${{ github.workspace }}
+
+      - name: Audit Output
+        run: |
+          git status
+          echo "OpenHands cycle complete."
