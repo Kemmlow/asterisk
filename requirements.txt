@@ -1,4 +1,3 @@
 openai
 mcp-python-client
 python-dotenv
-asyncio
