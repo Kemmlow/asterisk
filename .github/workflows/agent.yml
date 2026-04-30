@@ -1,11 +1,11 @@
-name: ASTERISK-V4.1 Autonomous Cycle
+name: ASTERISK-V4.2 PROD Cycle
 on:
   workflow_dispatch:
     inputs:
       task:
         description: 'Goal'
         required: true
-        default: 'Refactor the agent_main.py logic and create a PR.'
+        default: 'Scan repo for technical debt and create an optimization PR.'
 
 jobs:
   run-agent:
@@ -20,9 +20,10 @@ jobs:
       - uses: actions/setup-python@v5
         with: {python-version: '3.11'}
 
-      - name: Install
+      - name: Install Dependencies
         run: |
           pip install openai mcp-python-client python-dotenv
+          npm install -g @playwright/mcp@latest mcp-shell-server @modelcontextprotocol/server-github @modelcontextprotocol/server-filesystem
           npx playwright install --with-deps chromium
 
       - name: Execute
