@@ -15,19 +15,30 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: {node-version: '20'}
+      
+      - name: Setup Environment
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          
       - uses: actions/setup-python@v5
-        with: {python-version: '3.11'}
+        with:
+          python-version: '3.11'
 
-      - name: Pre-Warm MCP Cache
+      - name: Pre-Warm MCP Cache & Tools
         run: |
+          # Upgrade pip to stop the notice
+          python -m pip install --upgrade pip
           pip install openai mcp-python-client python-dotenv
-          # Pre-downloading prevents npx from hanging during the Python execution
+          
+          # Warming the cache: we provide '.' as a dummy path for the FS server 
+          # so it doesn't error out during the version check.
           npx --yes @playwright/mcp@latest --version
           npx --yes @modelcontextprotocol/server-github --version
-          npx --yes @modelcontextprotocol/server-filesystem --version
+          npx --yes @modelcontextprotocol/server-filesystem . --help
           npx --yes mcp-shell-server --version
+          
+          # Install browser binaries
           npx playwright install --with-deps chromium
 
       - name: Execute Production Cycle
