@@ -24,11 +24,13 @@ jobs:
         run: |
           pip install openai mcp-python-client python-dotenv
           sudo npm install -g @playwright/mcp@latest mcp-shell-server @modelcontextprotocol/server-github @modelcontextprotocol/server-filesystem
-          # Pre-linking bypasses NPX lookup hangups
-          sudo ln -s $(which mcp-server-github) /usr/local/bin/mcp-server-github
-          sudo ln -s $(which mcp-server-filesystem) /usr/local/bin/mcp-server-filesystem
-          sudo ln -s $(which mcp-shell-server) /usr/local/bin/mcp-shell-server
-          sudo ln -s $(which playwright-mcp) /usr/local/bin/playwright-mcp
+          
+          # Using -sf (force) to overwrite existing binaries/links and avoid the 'File exists' crash
+          sudo ln -sf $(which mcp-server-github) /usr/local/bin/mcp-server-github
+          sudo ln -sf $(which mcp-server-filesystem) /usr/local/bin/mcp-server-filesystem
+          sudo ln -sf $(which mcp-shell-server) /usr/local/bin/mcp-shell-server
+          sudo ln -sf $(which playwright-mcp) /usr/local/bin/playwright-mcp
+          
           npx playwright install --with-deps chromium
 
       - name: Execute
