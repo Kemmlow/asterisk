@@ -2,7 +2,6 @@ import os
 import json
 import asyncio
 import logging
-import subprocess
 from typing import List, Dict, Any
 from openai import AsyncOpenAI
 from mcp import ClientSession, StdioServerParameters
@@ -26,7 +25,6 @@ client = AsyncOpenAI(
     base_url=os.getenv("NOVITA_BASE_URL", "https://api.novita.ai/openai")
 )
 
-# Hardened Personas for Heavy-Duty Coding
 UNIVERSAL_PERSONAS = [
     "LOGIC: Senior Architect. Focus on Big O complexity, type safety, and memory management.",
     "CREATIVE: Polyglot Developer. Focus on design patterns (Functional, OOP) and clean abstractions.",
@@ -63,18 +61,18 @@ class ReasoningHarness:
 # 3. Execution & MCP Bridge
 # ==========================================
 async def run_agent():
-    # Phase 1 & 2: Planning
     reports = await asyncio.gather(*[get_specialist_reasoning(p, USER_TASK) for p in UNIVERSAL_PERSONAS])
     blueprint = await ReasoningHarness.synthesize(USER_TASK, "\n\n".join(reports))
 
-    # Phase 3: Robust MCP initialization (No-API / Local)
-    # npx --yes ensures no prompts; stderr=DEVNULL prevents pipe clogging
+    # Path fix: Ensure current working directory is explicitly passed
+    cwd = os.getcwd()
+
     mcp_configs = {
-        "browser": StdioServerParameters(command="npx", args=["-y", "@playwright/mcp@latest", "--headless"]),
+        "browser": StdioServerParameters(command="npx", args=["-y", "@playwright/mcp@latest", "--headless"], env=os.environ),
         "git": StdioServerParameters(command="npx", args=["-y", "@modelcontextprotocol/server-github"], 
                                     env={**os.environ, "GITHUB_PERSONAL_ACCESS_TOKEN": os.getenv("GITHUB_TOKEN")}),
-        "fs": StdioServerParameters(command="npx", args=["-y", "@modelcontextprotocol/server-filesystem", os.getcwd()]),
-        "shell": StdioServerParameters(command="npx", args=["-y", "mcp-shell-server"])
+        "fs": StdioServerParameters(command="npx", args=["-y", "@modelcontextprotocol/server-filesystem", cwd], env=os.environ),
+        "shell": StdioServerParameters(command="npx", args=["-y", "mcp-shell-server"], env=os.environ)
     }
 
     async with stdio_client(mcp_configs["browser"]) as (b_r, b_w), \
@@ -85,7 +83,6 @@ async def run_agent():
         sessions = [ClientSession(b_r, b_w), ClientSession(g_r, g_w), ClientSession(f_r, f_w), ClientSession(s_r, s_w)]
         await asyncio.gather(*(s.initialize() for s in sessions))
 
-        # Tool Mapping
         tool_map = {}
         available_tools = []
         for sess in sessions:
@@ -119,4 +116,4 @@ async def run_agent():
                     messages.append({"role": "tool", "tool_call_id": tc.id, "name": tc.function.name, "content": f"Error: {e}"})
 
 if __name__ == "__main__":
-    asyncio.run(run_agent())
+    async asyncio.run(run_agent())
