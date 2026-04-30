@@ -31,5 +31,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           AGENT_TASK: ${{ github.event.inputs.task }}
         run: |
-          uv pip install --system openhands-sdk openhands-tools
+          # Use --break-system-packages to override the PEP 668 protection in CI
+          uv pip install --system --break-system-packages openhands-sdk openhands-tools mcp
           python agent_main.py
