@@ -3,38 +3,34 @@ on:
   workflow_dispatch:
     inputs:
       task:
-        description: 'What should the agent do?'
+        description: 'Goal for the agent'
         required: true
-        default: 'Research the latest AI news and summarize.'
+        default: 'Research the latest benchmarks for Ling-2.6-1T.'
 
 jobs:
-  run-autonomous-agent:
+  run-agent:
     runs-on: ubuntu-latest
     timeout-minutes: 240
     
     steps:
-      - name: Checkout Code
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Setup Node.js
+      - name: Setup Node & Python
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
-      - name: Install Python Dependencies
-        run: pip install -r requirements.txt
-
-      - name: Install Playwright MCP
+      - name: Install Dependencies
         run: |
-          npm install -g @modelcontextprotocol/server-playwright
+          pip install -r requirements.txt
+          npm install -g @playwright/mcp@latest
           npx playwright install --with-deps chromium
 
-      - name: Execute Autonomous Loop
+      - name: Run Agent
         env:
           NOVITA_API_KEY: ${{ secrets.NOVITA_API_KEY }}
           NOVITA_BASE_URL: "https://api.novita.ai/v1"
