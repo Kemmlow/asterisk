@@ -1,4 +1,4 @@
-name: OpenAI Responses Flask PR
+name: AI Flask Project Generator
 
 on:
   workflow_dispatch:
@@ -23,13 +23,13 @@ jobs:
       - name: Install deps
         run: pip install openai
 
-      - name: Generate files via Responses API
+      - name: Generate full Flask project via Responses API
         env:
           OPENAI_API_KEY: dummy
           OPENAI_BASE_URL: https://kemmlowww-glm-5-1.hf.space/v1
         run: |
           python << 'PY'
-          import os, json
+          import os, json, re
           from openai import OpenAI
 
           client = OpenAI(
@@ -38,56 +38,74 @@ jobs:
           )
 
           prompt = """
-          Return ONLY valid JSON (no markdown, no explanation):
+          Return ONLY valid JSON (no markdown).
 
+          Create a small but useful Flask web app with:
+          - modular structure
+          - templates + static CSS
+          - 2 routes: '/' and '/about'
+          - clean readable code
+
+          Output format:
           {
-            "app.py": "<python flask app>",
-            "requirements.txt": "flask"
+            "path/to/file": "content"
           }
 
-          Rules:
-          - app.py must use Flask
-          - route '/' returns 'Hello from Codex'
-          - minimal clean code
+          Required files:
+          - app/__init__.py
+          - app/routes.py
+          - templates/index.html
+          - templates/about.html
+          - static/style.css
+          - run.py
+          - requirements.txt
+          - README.md
+
+          Requirements:
+          - Flask app must run with python run.py
+          - simple HTML UI
+          - minimal but clean styling
           """
 
           resp = client.responses.create(
               model="kimi-k2.6",
-              input=prompt,
+              input=[{"role": "user", "content": prompt}]
           )
 
           text = resp.output_text.strip()
 
-          # fail-safe: extract JSON
-          if text.startswith("```"):
-              text = text.split("```")[1]
+          # robust JSON extraction
+          text = re.sub(r"```.*?```", "", text, flags=re.S)
+          text = text[text.find("{"): text.rfind("}")+1]
 
           data = json.loads(text)
 
-          for name, content in data.items():
-              with open(name, "w") as f:
+          for path, content in data.items():
+              os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+              with open(path, "w") as f:
                   f.write(content)
 
-          print("Files written:", list(data.keys()))
+          print("Generated files:", list(data.keys()))
           PY
-
-      - name: Commit changes
-        run: |
-          git config user.name "ai-bot"
-          git config user.email "ai@users.noreply.github.com"
-          git checkout -b ai/flask-app
-          git add app.py requirements.txt
-          git commit -m "feat: add minimal Flask app via Responses API" || echo "No changes"
-
-      - name: Push branch
-        run: git push origin ai/flask-app || echo "Push skipped"
 
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v6
         with:
-          branch: ai/flask-app
-          title: "AI: minimal Flask app"
+          branch: ai/flask-full-app
+          title: "AI: Full Flask Web App"
           body: |
-            Generated using OpenAI-compatible Responses API (Kimi proxy).
-          commit-message: "feat: add minimal Flask app"
+            Generated a modular Flask web app using Responses API (Kimi proxy).
+
+            Includes:
+            - templates + styling
+            - multiple routes
+            - clean structure
+          commit-message: "feat: generate full Flask app"
+          add-paths: |
+            app/**
+            templates/**
+            static/**
+            run.py
+            requirements.txt
+            README.md
           delete-branch: true
