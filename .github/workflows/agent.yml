@@ -1,4 +1,4 @@
-name: Codex Flask PR (Custom API)
+name: Codex Flask PR (v0.80 + Proxy)
 
 on:
   workflow_dispatch:
@@ -12,26 +12,22 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: "20"
 
-      - name: Install Codex CLI
-        run: npm install -g @openai/codex
+      - name: Install Codex CLI (stable old)
+        run: npm install -g @openai/codex@0.80.0
 
-      - name: Run Codex using YOUR API
+      - name: Generate Flask app via your API
         env:
           OPENAI_API_KEY: dummy
           OPENAI_BASE_URL: https://kemmlowww-glm-5-1.hf.space/v1
-          CODEX_QUIET_MODE: 1
         run: |
-          codex exec --full-auto -m kimi-k2.6 "
+          codex exec "
           Create a minimal Flask app in the root directory:
-
           - app.py with Flask
           - route '/' returns 'Hello from Codex'
           - requirements.txt with flask only
@@ -44,16 +40,14 @@ jobs:
           git config user.email "codex@users.noreply.github.com"
           git checkout -b codex/flask-app
           git add .
-          git commit -m "feat: add Flask app via Codex (custom API)" || echo "No changes"
+          git commit -m "feat: add Flask app via Codex proxy" || echo "No changes"
 
       - name: Push branch
         run: git push origin codex/flask-app || echo "Push skipped"
 
-      - name: Create Pull Request
+      - name: Create PR
         uses: peter-evans/create-pull-request@v6
         with:
           branch: codex/flask-app
-          title: "Codex: Add Flask app (custom API)"
-          body: |
-            Generated using Codex CLI with custom proxy API
-            Base: https://kemmlowww-glm-5-1.hf.space
+          title: "Codex: Flask app via proxy"
+          body: "Generated using Codex CLI v0.80 with custom API"
