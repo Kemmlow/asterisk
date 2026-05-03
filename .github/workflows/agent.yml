@@ -1,4 +1,4 @@
-name: Cline Flask PR
+name: OpenAI Responses Flask PR
 
 on:
   workflow_dispatch:
@@ -8,82 +8,86 @@ permissions:
   pull-requests: write
 
 jobs:
-  cline:
+  generate:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          node-version: "22"
+          python-version: "3.11"
 
-      - name: Install Cline CLI
-        run: npm install -g cline
+      - name: Install deps
+        run: pip install openai
 
-      - name: Set Cline workspace dir
+      - name: Generate files via Responses API
+        env:
+          OPENAI_API_KEY: dummy
+          OPENAI_BASE_URL: https://kemmlowww-glm-5-1.hf.space/v1
         run: |
-          echo "CLINE_DIR=$RUNNER_TEMP/cline" >> "$GITHUB_ENV"
+          python << 'PY'
+          import os, json
+          from openai import OpenAI
 
-      - name: Auth Cline to updated Kimi proxy
-        run: |
-          cline auth \
-            -p openai \
-            -k dummy \
-            -m kimi-k2.6 \
-            -b https://kemmlowww-glm-5-1.hf.space/v1
+          client = OpenAI(
+              api_key=os.environ["OPENAI_API_KEY"],
+              base_url=os.environ["OPENAI_BASE_URL"]
+          )
 
-      - name: Add Cline rules for this task
-        run: |
-          mkdir -p .clinerules
-          cat > .clinerules/00-flask-task.md <<'EOF'
-          # Flask app task rules
+          prompt = """
+          Return ONLY valid JSON (no markdown, no explanation):
 
-          - Create only these files in the repo root:
-            - app.py
-            - requirements.txt
-          - app.py must use Flask and return "Hello from Codex" on route "/"
-          - requirements.txt must contain only:
-            flask
-          - Do not add extra files.
-          - Do not run tests.
-          - When the task is complete, call attempt_completion with a non-empty result string.
-          EOF
+          {
+            "app.py": "<python flask app>",
+            "requirements.txt": "flask"
+          }
 
-      - name: Run Cline
-        run: |
-          cline -y -c "$GITHUB_WORKSPACE" "
-          Create a minimal Flask app in the repository root.
-
-          Requirements:
-          - write app.py in the root
+          Rules:
           - app.py must use Flask
-          - route '/' must return 'Hello from Codex'
-          - write requirements.txt with only flask
-          - do not add extra files
-          - keep the code minimal and clean
-          - when finished, call attempt_completion with result='Created app.py and requirements.txt'
-          "
+          - route '/' returns 'Hello from Codex'
+          - minimal clean code
+          """
+
+          resp = client.responses.create(
+              model="kimi-k2.6",
+              input=prompt,
+          )
+
+          text = resp.output_text.strip()
+
+          # fail-safe: extract JSON
+          if text.startswith("```"):
+              text = text.split("```")[1]
+
+          data = json.loads(text)
+
+          for name, content in data.items():
+              with open(name, "w") as f:
+                  f.write(content)
+
+          print("Files written:", list(data.keys()))
+          PY
 
       - name: Commit changes
         run: |
-          git config user.name "cline-bot"
-          git config user.email "cline@users.noreply.github.com"
-          git checkout -b cline/flask-app
-          git add app.py requirements.txt .clinerules/00-flask-task.md
-          git commit -m "feat: add minimal Flask app via Cline" || echo "No changes"
+          git config user.name "ai-bot"
+          git config user.email "ai@users.noreply.github.com"
+          git checkout -b ai/flask-app
+          git add app.py requirements.txt
+          git commit -m "feat: add minimal Flask app via Responses API" || echo "No changes"
 
       - name: Push branch
-        run: git push origin cline/flask-app || echo "Push skipped"
+        run: git push origin ai/flask-app || echo "Push skipped"
 
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v6
         with:
-          branch: cline/flask-app
-          title: "Cline: add minimal Flask app"
+          branch: ai/flask-app
+          title: "AI: minimal Flask app"
           body: |
-            Generated with Cline CLI using the updated Kimi proxy and workspace rules.
+            Generated using OpenAI-compatible Responses API (Kimi proxy).
           commit-message: "feat: add minimal Flask app"
           delete-branch: true
