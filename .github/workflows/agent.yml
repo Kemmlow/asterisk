@@ -1,42 +1,59 @@
-name: OPENHANDS-PROD-SUCCESS
+name: Codex Flask PR (Custom API)
+
 on:
   workflow_dispatch:
-    inputs:
-      task:
-        description: 'Mission'
-        required: true
-        default: 'Build the Flask converter app per PROMPT.md'
+
+permissions:
+  contents: write
+  pull-requests: write
 
 jobs:
-  execute:
+  codex:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
+
     steps:
-      - name: Checkout Code
+      - name: Checkout repo
         uses: actions/checkout@v4
-      
-      - name: Setup Environment
-        run: |
-          # Install uv
-          curl -LsSf https://astral.sh/uv/install.sh | sh
-          # Create and activate Virtual Environment
-          uv venv .venv
-          echo "VIRTUAL_ENV=.venv" >> $GITHUB_ENV
-          echo "$GITHUB_WORKSPACE/.venv/bin" >> $GITHUB_PATH
 
-      - name: Install Dependencies
-        run: |
-          uv pip install openhands-sdk openhands-tools
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
 
-      - name: Run Agent
+      - name: Install Codex CLI
+        run: npm install -g @openai/codex
+
+      - name: Run Codex using YOUR API
         env:
-          LLM_API_KEY: ${{ secrets.NOVITA_API_KEY }}
-          LLM_BASE_URL: "https://api.novita.ai/openai"
-          # Handles blank vars gracefully
-          LLM_MODEL: "novita/${{ vars.MODEL_NAME || 'ling-2.6-1t' }}"
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          AGENT_TASK: ${{ github.event.inputs.task }}
-        run: python agent_main.py
-        
+          OPENAI_API_KEY: dummy
+          OPENAI_BASE_URL: https://kemmlowww-glm-5-1.hf.space/v1
+          CODEX_QUIET_MODE: 1
+        run: |
+          codex exec --full-auto -m kimi-k2.6 "
+          Create a minimal Flask app in the root directory:
+
+          - app.py with Flask
+          - route '/' returns 'Hello from Codex'
+          - requirements.txt with flask only
+          - no extra explanation
+          "
+
+      - name: Commit changes
+        run: |
+          git config user.name "codex-bot"
+          git config user.email "codex@users.noreply.github.com"
+          git checkout -b codex/flask-app
+          git add .
+          git commit -m "feat: add Flask app via Codex (custom API)" || echo "No changes"
+
+      - name: Push branch
+        run: git push origin codex/flask-app || echo "Push skipped"
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: codex/flask-app
+          title: "Codex: Add Flask app (custom API)"
+          body: |
+            Generated using Codex CLI with custom proxy API
+            Base: https://kemmlowww-glm-5-1.hf.space
