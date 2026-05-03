@@ -23,11 +23,11 @@ jobs:
       - name: Install Cline CLI
         run: npm install -g cline
 
-      - name: Configure Cline env
+      - name: Set Cline workspace dir
         run: |
           echo "CLINE_DIR=$RUNNER_TEMP/cline" >> "$GITHUB_ENV"
 
-      - name: Auth Cline to Kimi proxy
+      - name: Auth Cline to updated Kimi proxy
         run: |
           cline auth \
             -p openai \
@@ -35,9 +35,26 @@ jobs:
             -m kimi-k2.6 \
             -b https://kemmlowww-glm-5-1.hf.space/v1
 
-      - name: Run Cline to create Flask app
+      - name: Add Cline rules for this task
         run: |
-          PROMPT=$(cat <<'EOF'
+          mkdir -p .clinerules
+          cat > .clinerules/00-flask-task.md <<'EOF'
+          # Flask app task rules
+
+          - Create only these files in the repo root:
+            - app.py
+            - requirements.txt
+          - app.py must use Flask and return "Hello from Codex" on route "/"
+          - requirements.txt must contain only:
+            flask
+          - Do not add extra files.
+          - Do not run tests.
+          - When the task is complete, call attempt_completion with a non-empty result string.
+          EOF
+
+      - name: Run Cline
+        run: |
+          cline -y -c "$GITHUB_WORKSPACE" "
           Create a minimal Flask app in the repository root.
 
           Requirements:
@@ -47,10 +64,19 @@ jobs:
           - write requirements.txt with only flask
           - do not add extra files
           - keep the code minimal and clean
-          EOF
-          )
+          - when finished, call attempt_completion with result='Created app.py and requirements.txt'
+          "
 
-          cline -y --json -c "$GITHUB_WORKSPACE" "$PROMPT"
+      - name: Commit changes
+        run: |
+          git config user.name "cline-bot"
+          git config user.email "cline@users.noreply.github.com"
+          git checkout -b cline/flask-app
+          git add app.py requirements.txt .clinerules/00-flask-task.md
+          git commit -m "feat: add minimal Flask app via Cline" || echo "No changes"
+
+      - name: Push branch
+        run: git push origin cline/flask-app || echo "Push skipped"
 
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v6
@@ -58,6 +84,6 @@ jobs:
           branch: cline/flask-app
           title: "Cline: add minimal Flask app"
           body: |
-            Generated with Cline CLI using the updated Kimi proxy.
+            Generated with Cline CLI using the updated Kimi proxy and workspace rules.
           commit-message: "feat: add minimal Flask app"
           delete-branch: true
