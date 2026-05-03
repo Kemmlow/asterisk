@@ -1,4 +1,4 @@
-name: Codex Flask PR (Kimi updated space)
+name: Codex Flask PR (updated Kimi space)
 
 on:
   workflow_dispatch:
@@ -10,6 +10,7 @@ permissions:
 jobs:
   codex:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
 
     steps:
       - name: Checkout repo
@@ -23,7 +24,7 @@ jobs:
       - name: Install Codex CLI
         run: npm install -g @openai/codex
 
-      - name: Configure Codex for Kimi proxy
+      - name: Configure Codex for updated Kimi proxy
         run: |
           mkdir -p ~/.codex
           cat > ~/.codex/config.toml <<'EOF'
@@ -40,15 +41,17 @@ jobs:
           base_url = "https://kemmlowww-glm-5-1.hf.space/v1"
           env_key = "OPENAI_API_KEY"
           wire_api = "responses"
+          request_max_retries = 10
+          stream_max_retries = 20
+          stream_idle_timeout_ms = 3600000
           EOF
 
-      - name: Run Codex to generate Flask app
+      - name: Run Codex
         env:
           OPENAI_API_KEY: dummy
         run: |
-          codex exec "
+          PROMPT=$(cat <<'EOF'
           Create a minimal Flask app in the repository root.
-
           Requirements:
           - write app.py in the root
           - app.py must use Flask
@@ -56,7 +59,10 @@ jobs:
           - write requirements.txt with only flask
           - do not add extra files
           - keep the code minimal and clean
-          "
+          EOF
+          )
+
+          codex exec --sandbox workspace-write --json --output-last-message .codex-last-message.txt "$PROMPT"
 
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v6
@@ -64,7 +70,7 @@ jobs:
           branch: codex/flask-app
           title: "Codex: add minimal Flask app"
           body: |
-            Generated with Codex CLI using the custom Kimi proxy provider.
-            The workflow uses the updated Space and the Responses API.
+            Generated with Codex CLI using the updated Kimi proxy provider.
+            The workflow uses the Responses API and workspace-write sandbox.
           commit-message: "feat: add minimal Flask app"
           delete-branch: true
