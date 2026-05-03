@@ -11,9 +11,6 @@ jobs:
   cline:
     runs-on: ubuntu-latest
 
-    env:
-      CLINE_DIR: ${{ runner.temp }}/cline
-
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -26,7 +23,11 @@ jobs:
       - name: Install Cline CLI
         run: npm install -g cline
 
-      - name: Configure Cline for updated Kimi Space
+      - name: Configure Cline env
+        run: |
+          echo "CLINE_DIR=$RUNNER_TEMP/cline" >> "$GITHUB_ENV"
+
+      - name: Auth Cline to Kimi proxy
         run: |
           cline auth \
             -p openai \
