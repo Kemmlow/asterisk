@@ -1,4 +1,4 @@
-name: Codex Flask PR (Kimi Proxy FIXED)
+name: Codex Flask PR (Kimi updated space)
 
 on:
   workflow_dispatch:
@@ -12,56 +12,59 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repo
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
           node-version: "20"
 
-      - name: Install Codex CLI (stable old)
-        run: npm install -g @openai/codex@0.80.0
+      - name: Install Codex CLI
+        run: npm install -g @openai/codex
 
-      # 🔥 CRITICAL STEP — create config.toml
-      - name: Configure Codex to use YOUR API (chat mode)
+      - name: Configure Codex for Kimi proxy
         run: |
           mkdir -p ~/.codex
-          cat > ~/.codex/config.toml << 'EOF'
+          cat > ~/.codex/config.toml <<'EOF'
           model = "kimi-k2.6"
           model_provider = "kimi"
+          approval_policy = "never"
+          sandbox_mode = "workspace-write"
+
+          [sandbox_workspace_write]
+          network_access = true
 
           [model_providers.kimi]
           name = "Kimi Proxy"
           base_url = "https://kemmlowww-glm-5-1.hf.space/v1"
           env_key = "OPENAI_API_KEY"
-          wire_api = "chat"
+          wire_api = "responses"
           EOF
 
-      - name: Run Codex (forced chat mode)
+      - name: Run Codex to generate Flask app
         env:
           OPENAI_API_KEY: dummy
         run: |
           codex exec "
-          Create a minimal Flask app in the root directory:
-          - app.py with Flask
-          - route '/' returns 'Hello from Codex'
-          - requirements.txt with flask only
-          - no extra explanation
+          Create a minimal Flask app in the repository root.
+
+          Requirements:
+          - write app.py in the root
+          - app.py must use Flask
+          - route '/' must return 'Hello from Codex'
+          - write requirements.txt with only flask
+          - do not add extra files
+          - keep the code minimal and clean
           "
 
-      - name: Commit changes
-        run: |
-          git config user.name "codex-bot"
-          git config user.email "codex@users.noreply.github.com"
-          git checkout -b codex/flask-app
-          git add .
-          git commit -m "feat: add Flask app via Kimi proxy" || echo "No changes"
-
-      - name: Push branch
-        run: git push origin codex/flask-app || echo "Push skipped"
-
-      - name: Create PR
+      - name: Create Pull Request
         uses: peter-evans/create-pull-request@v6
         with:
           branch: codex/flask-app
-          title: "Codex: Flask app via Kimi proxy"
-          body: "Generated using Codex CLI + custom Kimi API"
+          title: "Codex: add minimal Flask app"
+          body: |
+            Generated with Codex CLI using the custom Kimi proxy provider.
+            The workflow uses the updated Space and the Responses API.
+          commit-message: "feat: add minimal Flask app"
+          delete-branch: true
