@@ -1,19 +1,22 @@
-name: AI Flask Project Generator
+name: AI Rust Autonomous Agent
 
 on:
   workflow_dispatch:
 
-permissions:
-  contents: write
-  pull-requests: write
-
 jobs:
-  generate:
+  agent:
     runs-on: ubuntu-latest
+    timeout-minutes: 360  # max allowed (6h)
 
     steps:
-      - name: Checkout repo
+      - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -23,13 +26,13 @@ jobs:
       - name: Install deps
         run: pip install openai
 
-      - name: Generate full Flask project via Responses API
+      - name: Run Autonomous Agent Loop
         env:
           OPENAI_API_KEY: dummy
           OPENAI_BASE_URL: https://kemmlowww-glm-5-1.hf.space/v1
         run: |
           python << 'PY'
-          import os, json, re
+          import os, subprocess, json, time
           from openai import OpenAI
 
           client = OpenAI(
@@ -37,75 +40,128 @@ jobs:
               base_url=os.environ["OPENAI_BASE_URL"]
           )
 
-          prompt = """
-          Return ONLY valid JSON (no markdown).
+          MAX_ITERS = 999999  # "infinite"
+          SLEEP = 2
 
-          Create a small but useful Flask web app with:
-          - modular structure
-          - templates + static CSS
-          - 2 routes: '/' and '/about'
-          - clean readable code
+          def run_cmd(cmd):
+              try:
+                  out = subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT, timeout=60)
+                  return out.decode()
+              except subprocess.CalledProcessError as e:
+                  return e.output.decode()
+              except Exception as e:
+                  return str(e)
 
-          Output format:
-          {
-            "path/to/file": "content"
-          }
-
-          Required files:
-          - app/__init__.py
-          - app/routes.py
-          - templates/index.html
-          - templates/about.html
-          - static/style.css
-          - run.py
-          - requirements.txt
-          - README.md
-
-          Requirements:
-          - Flask app must run with python run.py
-          - simple HTML UI
-          - minimal but clean styling
-          """
-
-          resp = client.responses.create(
-              model="kimi-k2.6",
-              input=[{"role": "user", "content": prompt}]
-          )
-
-          text = resp.output_text.strip()
-
-          # robust JSON extraction
-          text = re.sub(r"```.*?```", "", text, flags=re.S)
-          text = text[text.find("{"): text.rfind("}")+1]
-
-          data = json.loads(text)
-
-          for path, content in data.items():
+          def write_file(path, content):
               os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
               with open(path, "w") as f:
                   f.write(content)
 
-          print("Generated files:", list(data.keys()))
+          def delete_file(path):
+              if os.path.exists(path):
+                  os.remove(path)
+
+          def read_tree():
+              files = []
+              for root, _, fs in os.walk("."):
+                  for f in fs:
+                      if ".git" in root:
+                          continue
+                      files.append(os.path.join(root, f))
+              return files[:200]
+
+          SYSTEM_PROMPT = """
+          You are an autonomous Rust engineer agent.
+
+          You MUST return ONLY JSON:
+
+          {
+            "thought": "...",
+            "actions": [
+              {"type": "write", "path": "...", "content": "..."},
+              {"type": "delete", "path": "..."},
+              {"type": "cmd", "command": "..."}
+            ]
+          }
+
+          Goals:
+          - Build a useful Rust CLI tool or server
+          - Improve code continuously
+          - Fix build errors automatically
+          - Run cargo build/test frequently
+          - Add features iteratively
+
+          Rules:
+          - Always include at least one action
+          - Prefer small incremental improvements
+          - If build fails, fix it
+          - Keep project compiling
+          """
+
+          for i in range(MAX_ITERS):
+              print(f"\n--- ITERATION {i} ---")
+
+              tree = read_tree()
+
+              context = f"""
+              Files:
+              {tree}
+
+              Recent build:
+              {run_cmd("cargo build 2>&1 | tail -n 50")}
+              """
+
+              try:
+                  resp = client.responses.create(
+                      model="kimi-k2.6",
+                      input=SYSTEM_PROMPT + "\n" + context,
+                  )
+
+                  text = resp.output_text.strip()
+
+                  if text.startswith("```"):
+                      text = text.split("```")[1]
+
+                  data = json.loads(text)
+
+              except Exception as e:
+                  print("MODEL ERROR:", e)
+                  time.sleep(SLEEP)
+                  continue
+
+              print("THOUGHT:", data.get("thought"))
+
+              for act in data.get("actions", []):
+                  t = act.get("type")
+
+                  if t == "write":
+                      print("WRITE:", act["path"])
+                      write_file(act["path"], act["content"])
+
+                  elif t == "delete":
+                      print("DELETE:", act["path"])
+                      delete_file(act["path"])
+
+                  elif t == "cmd":
+                      print("CMD:", act["command"])
+                      out = run_cmd(act["command"])
+                      print(out[:500])
+
+              # ensure repo exists
+              if not os.path.exists("Cargo.toml"):
+                  print("Bootstrapping Rust project")
+                  run_cmd("cargo init --bin .")
+
+              # auto commit
+              run_cmd('git config user.name "ai-bot"')
+              run_cmd('git config user.email "ai@bot.com"')
+              run_cmd("git add .")
+              run_cmd(f'git commit -m "iter {i}" || true')
+
+              time.sleep(SLEEP)
+
           PY
 
-      - name: Create Pull Request
-        uses: peter-evans/create-pull-request@v6
-        with:
-          branch: ai/flask-full-app
-          title: "AI: Full Flask Web App"
-          body: |
-            Generated a modular Flask web app using Responses API (Kimi proxy).
-
-            Includes:
-            - templates + styling
-            - multiple routes
-            - clean structure
-          commit-message: "feat: generate full Flask app"
-          add-paths: |
-            app/**
-            templates/**
-            static/**
-            run.py
-            requirements.txt
-            README.md
-          delete-branch: true
+      - name: Push changes
+        run: |
+          git push origin HEAD || echo "push skipped"
