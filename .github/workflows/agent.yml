@@ -1,4 +1,4 @@
-name: Codex Flask PR (updated Kimi space)
+name: Cline Flask PR
 
 on:
   workflow_dispatch:
@@ -8,50 +8,37 @@ permissions:
   pull-requests: write
 
 jobs:
-  codex:
+  cline:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+
+    env:
+      CLINE_DIR: ${{ runner.temp }}/cline
 
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Setup Node
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
 
-      - name: Install Codex CLI
-        run: npm install -g @openai/codex
+      - name: Install Cline CLI
+        run: npm install -g cline
 
-      - name: Configure Codex for updated Kimi proxy
+      - name: Configure Cline for updated Kimi Space
         run: |
-          mkdir -p ~/.codex
-          cat > ~/.codex/config.toml <<'EOF'
-          model = "kimi-k2.6"
-          model_provider = "kimi"
-          approval_policy = "never"
-          sandbox_mode = "workspace-write"
+          cline auth \
+            -p openai \
+            -k dummy \
+            -m kimi-k2.6 \
+            -b https://kemmlowww-glm-5-1.hf.space/v1
 
-          [sandbox_workspace_write]
-          network_access = true
-
-          [model_providers.kimi]
-          name = "Kimi Proxy"
-          base_url = "https://kemmlowww-glm-5-1.hf.space/v1"
-          env_key = "OPENAI_API_KEY"
-          wire_api = "responses"
-          request_max_retries = 10
-          stream_max_retries = 20
-          stream_idle_timeout_ms = 3600000
-          EOF
-
-      - name: Run Codex
-        env:
-          OPENAI_API_KEY: dummy
+      - name: Run Cline to create Flask app
         run: |
           PROMPT=$(cat <<'EOF'
           Create a minimal Flask app in the repository root.
+
           Requirements:
           - write app.py in the root
           - app.py must use Flask
@@ -62,15 +49,14 @@ jobs:
           EOF
           )
 
-          codex exec --sandbox workspace-write --json --output-last-message .codex-last-message.txt "$PROMPT"
+          cline -y --json -c "$GITHUB_WORKSPACE" "$PROMPT"
 
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v6
         with:
-          branch: codex/flask-app
-          title: "Codex: add minimal Flask app"
+          branch: cline/flask-app
+          title: "Cline: add minimal Flask app"
           body: |
-            Generated with Codex CLI using the updated Kimi proxy provider.
-            The workflow uses the Responses API and workspace-write sandbox.
+            Generated with Cline CLI using the updated Kimi proxy.
           commit-message: "feat: add minimal Flask app"
           delete-branch: true
